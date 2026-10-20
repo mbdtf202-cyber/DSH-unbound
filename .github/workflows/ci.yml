@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: typecheck + test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20.11", "22.x", "24.x"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: install
+        run: npm ci --no-audit --no-fund
+
+      # 第一道门：全严格类型检查。
+      # 这不是"风格检查"——它能挡住未定义标识符（原项目 skills.js 的 fs、
+      # schema.js 的 LEGACY_STAGE_MAP 就是这类 bug，运行时才炸且被 catch 吞掉）。
+      - name: typecheck (strict)
+        run: npm run typecheck
+
+      # 第二道门：补丁表自身完整性（重复 id、空 pattern、非法正则）。
+      - name: verify patch table
+        run: npm run verify:patches
+
+      # 第三道门：行为测试。
+      - name: test
+        run: npm test
+
+      # 第四道门：构建产物必须可用（bin 能跑、help 正常）。
+      - name: build
+        run: npm run build
+
+      - name: smoke test CLI
+        run: |
+          node dist/cli/index.js --help
+          node dist/cli/index.js hosts || true
+          node dist/cli/index.js targets --ai-base /nonexistent || true
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: coverage
+        run: npm run test:cov

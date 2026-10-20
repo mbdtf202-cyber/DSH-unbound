@@ -1,0 +1,169 @@
+{
+ "agent-instructions": [
+  "dsh-agent-instructions/lib/index.js"
+ ],
+ "agent-loop": [
+  "dsh-agent-loop/lib/index.js"
+ ],
+ "agent-preset": [
+  "dsh-web-app/presets/standard.patch.yml"
+ ],
+ "api-session-controller": [
+  "dsh-api-session-controller/lib/index.js"
+ ],
+ "app-boot": [
+  "dsh-app-boot/lib/index.js"
+ ],
+ "auto-review": [
+  "dsh-experimental-auto-review/lib/index.js"
+ ],
+ "base": [
+  "dsh-base/cordis.patch.yml"
+ ],
+ "compaction-tool-result-pruner": [
+  "dsh-compaction-tool-result-pruner/lib/index.js"
+ ],
+ "conversation-client": [
+  "dsh-client-ui-conversation/lib/client.js"
+ ],
+ "deliverables-prompt": [
+  "dsh-client-ui-deliverables/lib/index.js"
+ ],
+ "desktop-shell": [],
+ "dsh-tools": [
+  "dsh-tools/lib/index.js"
+ ],
+ "dsh-tools-ptc": [
+  "dsh-tools/lib/types/ptc.js"
+ ],
+ "dsh-tools-types": [
+  "dsh-tools/lib/types/index.js"
+ ],
+ "escalation": [
+  "dsh-sandbox/lib/index.js"
+ ],
+ "fs-observation-policy": [
+  "dsh-fs-observation-policy/lib/index.js"
+ ],
+ "fs-sandbox": [
+  "dsh-fs-sandbox/lib/index.js"
+ ],
+ "harness-dev-context": [
+  "dsh-harness-dev-context/lib/index.js"
+ ],
+ "headless": [
+  "dsh-headless/cordis.patch.yml"
+ ],
+ "hooks-claude-code": [],
+ "hooks-claude-code-nested": [],
+ "hooks-codex": [],
+ "hooks-codex-nested": [],
+ "liangshen-tool-bootstrap": [],
+ "llm-deepseek": [
+  "dsh-llm-deepseek/lib/index.js"
+ ],
+ "permission-presets": [
+  "dsh-permission-presets/lib/index.js"
+ ],
+ "permission-presets-types": [
+  "dsh-permission-presets/lib/types/index.js"
+ ],
+ "persona": [
+  "dsh-persona/lib/index.js"
+ ],
+ "pi-ai-anthropic-messages": [],
+ "pi-ai-completions": [],
+ "pi-ai-responses-shared": [],
+ "preset-acp-app": [
+  "dsh-acp-app/cordis.patch.yml"
+ ],
+ "preset-cordis": [
+  "dsh-web-app/presets/cordis.patch.yml"
+ ],
+ "preset-liangshen": [],
+ "preset-liangshen-pkg": [],
+ "preset-minimal": [
+  "dsh-web-app/presets/minimal.patch.yml"
+ ],
+ "preset-ptc": [
+  "dsh-web-app/presets/ptc.patch.yml"
+ ],
+ "preset-sdk-app": [
+  "dsh-sdk-app/cordis.patch.yml"
+ ],
+ "preset-sdk-minimal": [
+  "dsh-sdk-minimal/cordis.patch.yml"
+ ],
+ "preset-standard": [
+  "dsh-web-app/presets/standard.patch.yml"
+ ],
+ "preset-unrestricted": [],
+ "repeat-tool-reminder": [
+  "dsh-repeat-tool-reminder/lib/index.js"
+ ],
+ "sandbox-local": [
+  "dsh-sandbox-local/lib/index.js"
+ ],
+ "sandbox-policy": [
+  "dsh-sandbox-policy/lib/index.js"
+ ],
+ "session": [
+  "dsh-session/lib/index.js"
+ ],
+ "session-format-v0": [
+  "dsh-session-format-v0-to-v1/lib/index.js"
+ ],
+ "session-log-deepseek": [
+  "dsh-session-log-deepseek/lib/index.js"
+ ],
+ "session-log-deepseek-types": [
+  "dsh-session-log-deepseek/lib/types/index.js"
+ ],
+ "session-reference": [
+  "dsh-session-reference/lib/index.js",
+  "dsh-session-reference/lib/types/index.js",
+  "dsh-session-reference/lib/types/spill.js"
+ ],
+ "settings": [
+  "dsh-settings/lib/index.js"
+ ],
+ "subagent": [
+  "dsh-subagent/lib/index.js"
+ ],
+ "subagent-types": [
+  "dsh-subagent/lib/types/child-agent.js"
+ ],
+ "system-prompt": [
+  "dsh-system-prompt/lib/index.js"
+ ],
+ "system-prompt-nested": [],
+ "tool-bash": [
+  "dsh-tool-bash/lib/index.js"
+ ],
+ "tool-fs": [
+  "dsh-tool-fs/lib/index.js"
+ ],
+ "tool-pwsh": [
+  "dsh-tool-pwsh/lib/index.js"
+ ],
+ "tool-subagent": [
+  "dsh-tool-subagent/lib/index.js"
+ ],
+ "tool-todo": [
+  "dsh-tool-todo/lib/index.js"
+ ],
+ "tool-web": [
+  "dsh-tool-web/lib/index.js"
+ ],
+ "tool-web-nested": [],
+ "user-approval": [
+  "dsh-user-approval/lib/types/index.js"
+ ],
+ "user-approval-code": [
+  "dsh-user-approval/lib/index.js"
+ ],
+ "user-approval-invariant": [],
+ "web-app": [
+  "dsh-web-app/cordis.patch.yml"
+ ]
+}
