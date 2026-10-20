@@ -42,6 +42,19 @@ jobs:
       - name: test
         run: npm test
 
+      # 可选门：如果 checkout 了 dsh-qilin，校验补丁表与它一致。
+      # 没有就直接跳过——不能因为外部私有仓库不可达而让 CI 红。
+      - name: cross-repo patch table sync (optional)
+        continue-on-error: true
+        run: |
+          if [ -n "$QILIN_PATH" ] && [ -d "$QILIN_PATH/lib" ]; then
+            node scripts/sync-patches.mjs verify --qilin "$QILIN_PATH"
+          else
+            echo "dsh-qilin not checked out; skipping cross-repo verification"
+          fi
+        env:
+          QILIN_PATH: ${{ github.workspace }}/../dsh-qilin
+
       # 第四道门：构建产物必须可用（bin 能跑、help 正常）。
       - name: build
         run: npm run build

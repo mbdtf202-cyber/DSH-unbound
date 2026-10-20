@@ -176,6 +176,25 @@ patches/
 test/          131 tests across 6 files
 ```
 
+### Kept in sync with `dsh-qilin`
+
+The patch table here is not a fork — it is a copy of `dsh-qilin`'s table,
+checked mechanically:
+
+```bash
+npm run verify:sync    # compares local table against dsh-qilin's export
+npm run sync:patches   # pulls the latest and rewrites patches/patches.json
+```
+
+`dsh-qilin` exposes `scripts/export-patches.mjs` as its stable data contract,
+so this repo never has to import its internals. The verifier fails with exit 1
+on any divergence, naming the offending patch.
+
+That contract also made a 3,564-line refactor on the `dsh-qilin` side safe:
+its `lib/core.js` went from 8,599 to 4,916 lines (patch data moved to
+`lib/patches-data.js`), with all 86 patches verified byte-identical before and
+after, and real-host `patchStatus` matching exactly (applied 69 / na 17).
+
 ### Patch data is extracted, not retyped
 
 `patches/patches.json` is produced by `scripts/extract-patches.mjs`, which

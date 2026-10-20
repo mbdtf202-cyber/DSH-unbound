@@ -1,6 +1,6 @@
 {
   "name": "dsh-unbound",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "DeepSeek Harness unbound — type-safe host patching engine. TypeScript rewrite of dsh-qilin's patch layer with drift detection and a real test suite.",
   "type": "module",
   "main": "./dist/index.js",
@@ -38,7 +38,9 @@
     "verify:patches": "npm run build:test && node dist-test/scripts/verify-patches.js",
     "prepublishOnly": "npm run build",
     "build:test": "tsc -p tsconfig.test.json",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "sync:patches": "node scripts/sync-patches.mjs sync",
+    "verify:sync": "node scripts/sync-patches.mjs verify"
   },
   "keywords": [
     "dsh",
