@@ -304,6 +304,11 @@ describe("equivalence: 资产查询（排序 / 筛选 / 分页）", () => {
     for (let i = 0; i < upList.items.length; i += 1) {
       const upId = upList.items[i]?.id;
       const myId = myList.items[i]?.id;
+      /* ⚠️ 这里是**已知且有意**的偏离，不是漏改：
+         上游 `getAsset` 的观测查询是 `ORDER BY collected_at DESC LIMIT 200`，缺唯一键。
+         同毫秒并列时顺序未定义，且超过 200 条时"留下哪 200 条"本身也不确定。
+         新实现补了 `, id DESC`（Lead 已批准）—— 给未定义行为定义确定答案属于修正。
+         所以这一项按"集合相等"比，顺序不比；顺序的确定性由 schema.test.ts 单独锁。 */
       assertSame(`getAsset#${String(i)}`, pair.upstream.getAsset(pair.upstreamId, upId), pair.mine.getAsset(pair.mineId, myId), pair.mine.root);
     }
   });

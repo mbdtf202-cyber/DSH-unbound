@@ -842,10 +842,19 @@ export class RedteamStore {
     const a = db.prepare<AssetRow>("SELECT * FROM asset WHERE id = ?").get(nullableInt(assetId) ?? -1);
     if (a === undefined) return undefined;
     const detail = this.assetRow(db, a);
+    /* ⚠️ 原实现是 `ORDER BY collected_at DESC LIMIT 200`，**缺唯一键**：
+       `collected_at` 只精确到毫秒，而 `importBundle` 一次采集会连插几条观测
+       （name / primary_name / fingerprint…），它们常落在**同一毫秒**。
+       并列时 SQLite 的返回顺序未定义 —— 更糟的是有 `LIMIT 200`：
+       观测数超过 200 时，**究竟留下哪 200 条本身就不确定**。
+       补 `, id DESC` 后语义确定："同一毫秒内后写入的排前面"，
+       同时让 LIMIT 的取舍也确定下来。
+       这不是行为变更：原先是**未定义**行为，给未定义行为定义出一个确定答案
+       是修正 —— 没有调用方会依赖"SQLite 恰好返回的那个顺序"。 */
     const observations = db
       .prepare<{ attr: string | null; value: string | null; provenance: string | null; tool: string | null; collected_at: string | null }>(
         `SELECT attr, value, provenance, tool, collected_at FROM observation
-      WHERE entity_kind = 'asset' AND entity_id = ? ORDER BY collected_at DESC LIMIT 200`,
+      WHERE entity_kind = 'asset' AND entity_id = ? ORDER BY collected_at DESC, id DESC LIMIT 200`,
       )
       .all(a.id);
     const edges = db

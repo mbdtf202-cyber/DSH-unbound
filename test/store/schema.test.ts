@@ -242,3 +242,111 @@ try {
     assert.equal(placeholders(3), "?,?,?");
   });
 });
+
+describe("schema: 观测排序的确定性（原实现缺唯一键）", () => {
+  it("同一毫秒的观测按 id 降序（后写入的排前面）", () => {
+    const { store } = temp();
+    const id = makeEngagement(store);
+    const db = store.db(id);
+    db.prepare(
+      "INSERT INTO asset(segment_cidr, ip, ip_int, state, scope) VALUES('10.0.0.0/24','10.0.0.5',167772165,'live','internal')",
+    ).run();
+    const assetId = Number(db.prepare<{ id: number }>("SELECT id FROM asset LIMIT 1").get()?.id ?? 0);
+    /* 三条**完全相同**的 collected_at（模拟 importBundle 一次采集连插几条观测） */
+    const sameStamp = "2024-06-01T12:00:00.000Z";
+    const ins = db.prepare(
+      `INSERT INTO observation(entity_kind, entity_id, attr, value, provenance, tool, collected_at)
+       VALUES('asset',?,?,?,'active','nmap',?)`,
+    );
+    ins.run(assetId, "name", "first", sameStamp);
+    ins.run(assetId, "primary_name", "second", sameStamp);
+    ins.run(assetId, "fingerprint", "third", sameStamp);
+    const detail = store.getAsset(id, assetId);
+    assert.deepEqual(
+      detail?.observations.map((o) => o.attr),
+      ["fingerprint", "primary_name", "name"],
+      "同毫秒必须按 id 降序 —— 原实现的顺序是未定义的",
+    );
+  });
+
+  it("跨毫秒仍按时间降序（id 只用于打破并列）", () => {
+    const { store } = temp();
+    const id = makeEngagement(store);
+    const db = store.db(id);
+    db.prepare(
+      "INSERT INTO asset(segment_cidr, ip, ip_int, state, scope) VALUES('10.0.0.0/24','10.0.0.6',167772166,'live','internal')",
+    ).run();
+    const assetId = Number(db.prepare<{ id: number }>("SELECT id FROM asset LIMIT 1").get()?.id ?? 0);
+    const ins = db.prepare(
+      `INSERT INTO observation(entity_kind, entity_id, attr, value, provenance, tool, collected_at)
+       VALUES('asset',?,?,?,'active','nmap',?)`,
+    );
+    /* 故意让 id 顺序与时间顺序**相反**：后插的那条时间更早 */
+    ins.run(assetId, "old", "v", "2024-06-01T10:00:00.000Z");
+    ins.run(assetId, "new", "v", "2024-06-01T12:00:00.000Z");
+    const detail = store.getAsset(id, assetId);
+    assert.deepEqual(detail?.observations.map((o) => o.attr), ["new", "old"], "时间优先，不能被 id 抢");
+  });
+
+  it("超过 200 条时留下的是「最新的 200 条」（LIMIT 取舍确定）", () => {
+    const { store } = temp();
+    const id = makeEngagement(store);
+    const db = store.db(id);
+    db.prepare(
+      "INSERT INTO asset(segment_cidr, ip, ip_int, state, scope) VALUES('10.0.0.0/24','10.0.0.7',167772167,'live','internal')",
+    ).run();
+    const assetId = Number(db.prepare<{ id: number }>("SELECT id FROM asset LIMIT 1").get()?.id ?? 0);
+    const ins = db.prepare(
+      `INSERT INTO observation(entity_kind, entity_id, attr, value, provenance, tool, collected_at)
+       VALUES('asset',?,?,?,'active','nmap',?)`,
+    );
+    /* 250 条，**全部同一毫秒** —— 这是 LIMIT 取舍最不确定的形态 */
+    const stamp = "2024-06-01T12:00:00.000Z";
+    for (let i = 0; i < 250; i += 1) ins.run(assetId, `attr-${String(i)}`, "v", stamp);
+    const detail = store.getAsset(id, assetId);
+    assert.equal(detail?.observations.length, 200, "LIMIT 200");
+    /* 补了 id DESC 之后，留下的必须是最后写入的 200 条（attr-249 … attr-50） */
+    assert.equal(detail?.observations[0]?.attr, "attr-249", "最新的排最前");
+    assert.equal(detail?.observations[199]?.attr, "attr-50", "被截掉的是最旧的 50 条");
+  });
+});
+
+describe("schema: 检索不会产生幽灵结果（FTS 孤儿行）", () => {
+  it("资产被删后，遗留的 asset_fts 行不会让检索命中不存在的资产", () => {
+    const { store } = temp();
+    const id = makeEngagement(store);
+    store.importBundle(id, {
+      assets: [{ ip: "10.0.0.5", primary_name: "ghost.example.test", provenance: "active", ports: [] }],
+    });
+    assert.equal(store.listAssets(id, { q: "ghost" }).total, 1, "删前能命中");
+    /* store 没有删除资产的接口（上游也没有），所以模拟"用户手工删库里的行" */
+    store.db(id).exec("DELETE FROM asset WHERE ip = '10.0.0.5'");
+    /* asset_fts 里确实留下了孤儿行 —— 这不是 bug，而是"FTS 不是数据源"的直接后果 */
+    const orphans = Number(store.db(id).prepare<{ n: number }>("SELECT COUNT(*) AS n FROM asset_fts").get()?.n ?? 0);
+    assert.equal(orphans >= 1, true, "孤儿行确实存在（FTS 只是索引）");
+    /* 关键断言：检索仍为 0 —— 因为查询是 `FROM asset a WHERE a.id IN (SELECT ... FROM asset_fts ...)`，
+       asset 表是驱动表，孤儿行只是"多一个匹配的 id"，而这个 id 在 asset 里已经不存在。 */
+    assert.equal(store.listAssets(id, { q: "ghost" }).total, 0, "绝不能返回幽灵结果");
+    assert.equal(store.listAssets(id, {}).total, 0, "列表总数为 0");
+    /* 详情页也查不到（getAsset 按 asset 表的 id 取） */
+    assert.equal(store.getAsset(id, 1), undefined);
+  });
+
+  it("LIMIT 的前提：检索的 FROM 是 asset，不是 asset_fts", () => {
+    const { store } = temp();
+    const id = makeEngagement(store);
+    /* 这条是给后人看的护栏：如果哪天有人把 SQL 改成 `FROM asset_fts JOIN asset`，
+       幽灵结果的风险就会变（虽然 INNER JOIN 仍安全，LEFT JOIN 就不安全了）。
+       直接断言行为：只有 asset 里存在的行才可能被返回。 */
+    store.importBundle(id, {
+      assets: [
+        { ip: "10.0.0.5", primary_name: "keep.example.test", provenance: "active", ports: [] },
+        { ip: "10.0.0.6", primary_name: "drop.example.test", provenance: "active", ports: [] },
+      ],
+    });
+    store.db(id).exec("DELETE FROM asset WHERE ip = '10.0.0.6'");
+    const hit = store.listAssets(id, { q: "example.test" });
+    assert.equal(hit.total, 1, "只有还存在的资产会被返回");
+    assert.equal(hit.items[0]?.ip, "10.0.0.5");
+  });
+});
