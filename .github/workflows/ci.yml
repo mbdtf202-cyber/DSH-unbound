@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ["20.11", "22.x", "24.x"]
+        node: ["22.x", "24.x"]
     steps:
       - uses: actions/checkout@v4
 
@@ -64,6 +64,21 @@ jobs:
           node dist/cli/index.js --help
           node dist/cli/index.js hosts || true
           node dist/cli/index.js targets --ai-base /nonexistent || true
+
+  min-node:
+    name: min supported node (22.5)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.5"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      # engines 声明 >=22.5，这里就实际在 22.5 上跑一遍，
+      # 防止声明与实际能力脱节（原项目 BUG-3 的同一个坑）。
+      - run: npm run typecheck
+      - run: npm test
 
   coverage:
     name: coverage

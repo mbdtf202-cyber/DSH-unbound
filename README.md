@@ -266,6 +266,72 @@ patterns reappear.
 
 ---
 
+## What this rewrite found (and fixed)
+
+These are defects found while migrating, not features added.
+
+### Security: a guard that never worked
+
+`assertPathWithin` compared lexically-resolved prefixes:
+
+```js
+const abs = resolve(target);
+const ok = roots.some(root => abs === root || abs.startsWith(root + sep));
+```
+
+Attack (reproduced):
+
+```
+<target-dir>/link.txt -> /tmp/outside/secret.txt
+guard: PASSES          # string starts with root
+readFileSync(guard's return) -> "SECRET"
+```
+
+The function's own comment says its only reason to exist is to stop untrusted
+`path` column values from being read into the browser panel. Lexical comparison
+never stops symlinks, so **the guard had never taken effect**. Fixed with real
+path resolution plus handling for two harder shapes: symlinked directory with a
+not-yet-created leaf, and a home directory that is itself a symlink.
+
+### Correctness: `engines` vs. actual capability
+
+The original declared `engines.node: ">=18"` while requiring `node:sqlite`
+(≥ 22.5). Install succeeds on Node 20, then fails at runtime.
+
+After migrating the store layer, this repo fell into the same trap — and the
+regression test added for the original bug caught it. `engines` is now
+`>=22.5.0`, and CI runs a dedicated job on exactly 22.5.
+
+### Process: a gate that ran 16% of the tests
+
+```bash
+npm test            -> no output, exit 0
+full glob           -> 1850 tests
+```
+
+`package.json` used `node --test dist-test/test/*.test.js`, matching only the
+7 top-level files. 37 of 44 test files live in subdirectories. CI showed green
+while running one sixth of the suite.
+
+Fixed, and `npm run verify:tests` now asserts three things the test run itself
+cannot: source/test file counts match, discovered test count is **greater than
+zero** (not merely matching `[0-9]+`, which `# tests 0` also satisfies), and
+discovered count ≥ files × 3.
+
+### Silent regressions caught by differential testing
+
+Migrating by "looks equivalent" produced two live regressions that only
+sample-by-sample comparison against the original expression found:
+
+- `formatTimestamp(0)` — the original used a bare truthiness check (`s ? ... : '—'`).
+  A "cleaner" three-way check made `0` render as `1970-01-01` instead of `—`.
+  Epoch zero is a plausible-looking timestamp, so nothing errors.
+- `optionEntries` — a `table[key] ?? key` fallback invented UI options the
+  backend does not recognise; selecting one silently sent an unknown state.
+
+Both now have tests whose comments state the *intent* ("lock the original
+bare-truthiness semantics"), not just the observation ("0 shows —").
+
 ## Verification
 
 ```bash

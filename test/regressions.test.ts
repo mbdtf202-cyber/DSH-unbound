@@ -8,7 +8,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { ensureBackupSync, findBackup, restoreFromBackupSync, atomicWriteFileSync } from "../src/fs/atomic.js";
+
+/** 仓库根。 */
+const ROOT = path.resolve(import.meta.dirname, "..", "..");
 
 describe("回归 BUG-1：未导入的 fs 导致 realpath 静默失效", () => {
   it("本项目的 realpath 调用都有真实绑定（不是靠全局 fs）", () => {
@@ -60,35 +64,44 @@ describe("回归 BUG-1：未导入的 fs 导致 realpath 静默失效", () => {
 });
 
 describe("回归 BUG-2：未定义标识符被 try/catch 吞掉", () => {
-  it("源码里不存在未声明的顶层标识符引用（用 TS 编译保证）", () => {
-    // 原 bug：schema.js 里用了 LEGACY_STAGE_MAP / SCOPE_SQL，两个都没定义也没 import，
-    // 外面套 try/catch → 两段迁移永远不执行且不报错。
-    // 本项目用 strict TS：未定义标识符是编译错误（TS2304），构建不过。
-    // 这里做一个廉价的二次确认：这些名字不该以「裸引用」出现。
-    const srcDir = path.join(import.meta.dirname, "..", "..", "src");
-    const forbiddenBare = ["LEGACY_STAGE_MAP", "SCOPE_SQL"];
-    const hits: string[] = [];
-    const walk = (dir: string): void => {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const fp = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          walk(fp);
-          continue;
-        }
-        if (!entry.name.endsWith(".ts")) continue;
-        const text = fs.readFileSync(fp, "utf8");
-        for (const name of forbiddenBare) {
-          if (text.includes(name)) hits.push(`${path.relative(srcDir, fp)}: ${name}`);
-        }
-      }
-    };
-    walk(srcDir);
-    assert.deepEqual(hits, [], `不应出现这些未定义的标识符：${hits.join(", ")}`);
+  /**
+   * 这条测试两度误报，根因相同：**用正则判断绑定关系是不可靠的**。
+   *   1. 只看名字是否出现 → 把定义处也当违规
+   *   2. 只认 import/const → 漏了 `export { X } from "./y.js"` 再导出
+   * 多行 import、再导出、别名、`import type`、解构……每种写法都要一条正则。
+   *
+   * 改为**交给编译器**：未定义标识符是 TS2304，`npm run typecheck` 是必经门禁。
+   * 这条测试只负责证明「那道门真的会响」，而不是自己重写一个不完整的检查器。
+   */
+  it("tsc 对未定义标识符确实报 TS2304（验证门禁有效）", () => {
+    const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-undefined-probe-"));
+    try {
+      const probe = path.join(probeDir, "probe.ts");
+      fs.writeFileSync(probe, "export const x = NOT_DEFINED_ANYWHERE;\n", "utf8");
+      const tscBin = path.join(ROOT, "node_modules", "typescript", "bin", "tsc");
+      const result = spawnSync(process.execPath, [tscBin, "--noEmit", "--strict", probe], {
+        encoding: "utf8",
+        cwd: ROOT,
+      });
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+      assert.notEqual(result.status, 0, "对未定义标识符，tsc 必须非零退出");
+      assert.match(output, /TS2304|Cannot find name/, `tsc 应报 TS2304，实际：${output.slice(0, 300)}`);
+    } finally {
+      fs.rmSync(probeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("schema 迁移用到的那两个名字确实被导出（防止被人删掉）", () => {
+    const schemaPath = path.join(ROOT, "src", "redteam", "store", "schema.ts");
+    if (!fs.existsSync(schemaPath)) return;
+    const schema = fs.readFileSync(schemaPath, "utf8");
+    assert.match(schema, /export const LEGACY_STAGE_MAP\b/, "LEGACY_STAGE_MAP 必须导出");
+    assert.match(schema, /export const SCOPE_SQL\b/, "SCOPE_SQL 必须导出");
   });
 });
 
 describe("回归 BUG-3：engines 与实际运行时需求不符", () => {
-  it("engines.node 不低于产物实际用到的能力（node --test / structuredClone）", () => {
+  it("engines.node 覆盖 node:sqlite（>=22.5）", () => {
     const pkgPath = path.join(import.meta.dirname, "..", "..", "package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { engines?: { node?: string } };
     const range = pkg.engines?.node ?? "";
@@ -98,13 +111,18 @@ describe("回归 BUG-3：engines 与实际运行时需求不符", () => {
     const m = /^>=\s*(\d+)\.(\d+)/.exec(range);
     assert.ok(m, `engines.node 应当是可解析的 >=X.Y 形式，实际是 "${range}"`);
     const major = Number(m[1]);
-    assert.ok(major >= 20, `engines.node 至少 >=20（当前 "${range}"）`);
+    const minor = Number(m[2]);
+    // 之所以是 22.5：store 层用 node:sqlite，该模块自 22.5 起提供。
+    // 这正是原项目 BUG-3 的同一个坑（声明 >=18 实际要 22.5），不能重犯。
+    const ok = major > 22 || (major === 22 && minor >= 5) || major >= 23;
+    assert.equal(ok, true, `engines.node 至少 >=22.5（当前 "${range}"）`);
   });
 
-  it("产物不依赖 Node 实验性模块（尤其不能出现 node:sqlite）", () => {
+  it("产物引用的实验性模块必须在 engines 覆盖范围内", () => {
     const distDir = path.join(import.meta.dirname, "..", "..", "dist");
     if (!fs.existsSync(distDir)) return; // 未构建时跳过（CI 会先 build）
-    const banned = ["node:sqlite", "node:test", "node:test/reporters"];
+    // node:sqlite 是允许的（engines 已声明 >=22.5），但测试框架模块绝不能进产物。
+    const banned = ["node:test", "node:test/reporters"];
     const hits: string[] = [];
     const walk = (dir: string): void => {
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

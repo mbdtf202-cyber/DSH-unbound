@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../.."
+  },
+  "include": [
+    "../../src/redteam/ui/**/*.ts",
+    "../../src/redteam/client/**/*.ts",
+    "../../src/shared/**/*.ts",
+    "../../src/host-api/**/*.ts",
+    "../../src/platform/**/*.ts",
+    "./**/*.ts"
+  ]
+}
