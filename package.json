@@ -32,8 +32,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && chmod +x dist/cli/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build:test && node --test \"dist-test/test/**/*.test.js\"",
-    "test:cov": "npm run build:test && node --test --experimental-test-coverage \"dist-test/test/**/*.test.js\"",
+    "test": "npm run build:test && node --test dist-test/test/*.test.js",
+    "test:cov": "npm run build:test && node --test --experimental-test-coverage dist-test/test/*.test.js",
     "extract:patches": "node scripts/extract-patches.mjs",
     "verify:patches": "npm run build:test && node dist-test/scripts/verify-patches.js",
     "prepublishOnly": "npm run build",
