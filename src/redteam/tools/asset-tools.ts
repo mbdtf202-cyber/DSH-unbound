@@ -19,6 +19,7 @@
 
 import type { ToolExecContext } from "../../host-api/types.js";
 import { agentOf } from "./context.js";
+import { TOOL_DESCRIPTIONS } from "./descriptions.js";
 import { defineTool, renderText, toToolJson } from "./define.js";
 import type { AnyTypedTool } from "./define.js";
 import { bindingViewOf, resolveEngagement } from "./context.js";
@@ -104,7 +105,7 @@ export function assetTools(store: StoreForTools, ctx: ToolRuntimeContext): reado
   const assetAdd = defineTool({
     name: "redteam_asset_add",
     description:
-      "把一个资产及其端口/服务/指纹写入资产库（幂等 upsert）。每条发现必须标注 provenance：被动收集填 passive，主动探测填 active，并填写 tool（数据源或工具名）。",
+      TOOL_DESCRIPTIONS.redteam_asset_add,
     parameters: {
       engagement: { type: "string", description: "靶标 id；省略则用当前会话绑定的靶标" },
       ip: { type: "string", required: true, description: "资产 IP（IPv4）" },
@@ -217,7 +218,7 @@ export function assetTools(store: StoreForTools, ctx: ToolRuntimeContext): reado
   const assetLink = defineTool({
     name: "redteam_asset_link",
     description:
-      "在资产库中写入一条关系边（图谱与后续横向分析共用）。relation 例如 resolves / exposes / contains / trusts / shares_cert。",
+      TOOL_DESCRIPTIONS.redteam_asset_link,
     parameters: {
       engagement: { type: "string" },
       src_kind: { type: "string", required: true, description: "segment | asset | domain | port …" },
@@ -250,7 +251,7 @@ export function assetTools(store: StoreForTools, ctx: ToolRuntimeContext): reado
   const assetQuery = defineTool({
     name: "redteam_asset_query",
     description:
-      "检索资产库。支持按 C 段、端口、服务、指纹、来源、内外网维度（scope）、排序（sort）、关键词（全文，覆盖 IP/域名/banner/服务/指纹）过滤。返回紧凑结果，含每个资产的开放端口与指纹及内外网归属。",
+      TOOL_DESCRIPTIONS.redteam_asset_query,
     parameters: {
       engagement: { type: "string" },
       cidr: { type: "string", description: "C 段，例如 203.0.113.0/24" },
@@ -301,7 +302,7 @@ export function assetTools(store: StoreForTools, ctx: ToolRuntimeContext): reado
   /* ── redteam_asset_get ──────────────────────────────────────────────── */
   const assetGet = defineTool({
     name: "redteam_asset_get",
-    description: "取单个资产的完整详情：全部端口与服务、指纹、采集溯源时间线、关系边。用于深入分析某个目标。",
+    description: TOOL_DESCRIPTIONS.redteam_asset_get,
     parameters: {
       engagement: { type: "string" },
       id: { type: "number", required: true, description: "资产 id（来自 redteam_asset_query 结果）" },
@@ -318,7 +319,7 @@ export function assetTools(store: StoreForTools, ctx: ToolRuntimeContext): reado
   /* ── redteam_asset_stats ────────────────────────────────────────────── */
   const assetStats = defineTool({
     name: "redteam_asset_stats",
-    description: "资产测绘概览：C 段数、资产数（存活）、开放端口、服务、指纹、被动/主动溯源条数，以及各 C 段的明细。",
+    description: TOOL_DESCRIPTIONS.redteam_asset_stats,
     parameters: { engagement: { type: "string" } },
     output: { schema: { type: "string" }, render: renderText },
     execute(args, exec) {
@@ -331,7 +332,7 @@ export function assetTools(store: StoreForTools, ctx: ToolRuntimeContext): reado
   const assetGraph = defineTool({
     name: "redteam_asset_graph",
     description:
-      "导出资产图谱（C 段 → 资产 → 开放端口，含域名解析边），用于拓扑推理与横向移动路径规划。节点数超过上限时按 C 段缩小范围。",
+      TOOL_DESCRIPTIONS.redteam_asset_graph,
     parameters: {
       engagement: { type: "string" },
       cidr: { type: "string", description: "只取某个 C 段的子图" },
@@ -357,7 +358,7 @@ export function assetTools(store: StoreForTools, ctx: ToolRuntimeContext): reado
   const assetTest = defineTool({
     name: "redteam_asset_test",
     description:
-      "记录对某个资产的测试情况：本次做了什么测试（`test`，追加式）、还剩什么攻击面（`surface`，覆盖式）、当前测试状态、是否被 WAF 封禁。**每个资产开始测之前先调一次（status=testing），测完/放弃再调一次**——资产测绘页面据此显示「未测试 / 测试中 / 已测试 / 被封禁 / 已放弃 / 无攻击面」。排除结论、登录失败原因、重测理由都写在 `test` 里。",
+      TOOL_DESCRIPTIONS.redteam_asset_test,
     parameters: {
       engagement: { type: "string" },
       asset_id: { type: "number", description: "资产 id（与 ip 二选一，优先 asset_id）" },
@@ -392,7 +393,7 @@ export function assetTools(store: StoreForTools, ctx: ToolRuntimeContext): reado
   const assetAssess = defineTool({
     name: "redteam_asset_assess",
     description:
-      "给资产做「易打性评估」：预期能拿下哪些成果（账号权限/RCE/服务器权限/数据库权限/敏感数据/边界突破）、优先级多高、判断理由。信息收集收口时对每个资产调用一次，供指挥者按性价比排序。",
+      TOOL_DESCRIPTIONS.redteam_asset_assess,
     parameters: {
       engagement: { type: "string" },
       asset_id: { type: "number" },
@@ -423,7 +424,7 @@ export function assetTools(store: StoreForTools, ctx: ToolRuntimeContext): reado
   const assetTimeline = defineTool({
     name: "redteam_asset_timeline",
     description:
-      "资产「发现时间」视图：按天聚合\"哪天收了多少资产\"（区分内网/外网），并列出最近发现的资产。用于回答\"这个资产是什么时候发现的\"、检查信息收集有没有断层，也用于本轮收集的收口核对。",
+      TOOL_DESCRIPTIONS.redteam_asset_timeline,
     parameters: {
       engagement: { type: "string" },
       limit: { type: "number", description: "最近资产条数，默认 50" },
@@ -458,7 +459,7 @@ export function assetTools(store: StoreForTools, ctx: ToolRuntimeContext): reado
   /* ── redteam_web_list ───────────────────────────────────────────────── */
   const webList = defineTool({
     name: "redteam_web_list",
-    description: "列出 Web 资产（含可直接访问的 URL 与页面标题）。做 Web 渗透前先看这里，优先从接口入手。",
+    description: TOOL_DESCRIPTIONS.redteam_web_list,
     parameters: {
       engagement: { type: "string" },
       cidr: { type: "string" },
@@ -496,7 +497,7 @@ export function assetTools(store: StoreForTools, ctx: ToolRuntimeContext): reado
   /* ── redteam_domain_index ───────────────────────────────────────────── */
   const domainIndex = defineTool({
     name: "redteam_domain_index",
-    description: "按域名维度聚合资产：每个域名关联了哪些 IP/资产。用于梳理主域名、子域与 C 段的关系。",
+    description: TOOL_DESCRIPTIONS.redteam_domain_index,
     parameters: { engagement: { type: "string" } },
     output: { schema: { type: "string" }, render: renderText },
     execute(args, exec) {

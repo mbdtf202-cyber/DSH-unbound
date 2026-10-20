@@ -54,7 +54,7 @@
     "prompt-eval"
   ],
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.15.0"
   },
   "license": "MIT",
   "devDependencies": {

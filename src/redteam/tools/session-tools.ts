@@ -38,6 +38,7 @@ import {
 } from "../../platform/skill-availability.js";
 import type { SkillSummary, SkillVerdict } from "../../platform/skill-availability.js";
 import { fixesForIssue } from "../../platform/skill-fixes.js";
+import { TOOL_DESCRIPTIONS } from "./descriptions.js";
 import { defineTool, renderText, toToolJson, withStructuredErrors } from "./define.js";
 import type { AnyTypedTool, TypedToolDefinition } from "./define.js";
 import {
@@ -173,7 +174,7 @@ export function sessionTools(
   const engagementOpen = defineTool({
     name: "redteam_engagement_open",
     description:
-      "打开或创建一次攻防演练靶标（按单位名称），并把**当前会话**绑定到该靶标（子智能体会自动继承）。后续所有资产工具默认作用于它。若靶标已存在则复用其资产库。写入的是本会话的绑定，不会改动其它会话正在用的靶标。",
+      TOOL_DESCRIPTIONS.redteam_engagement_open,
     parameters: {
       target: { type: "string", required: true, description: "靶标单位名称，例如「示例科技有限公司」" },
       scope: {
@@ -207,7 +208,7 @@ export function sessionTools(
   const sessionBind = defineTool({
     name: "redteam_session_bind",
     description:
-      "把一个**已经存在**的靶标绑定到当前会话（多会话并行时用：每个会话绑自己的靶标，互不串写）。可用靶标 id 或单位名称，省略则列出可绑定的靶标。",
+      TOOL_DESCRIPTIONS.redteam_session_bind,
     parameters: {
       engagement: { type: "string", description: "靶标 id 或单位名称；省略只列出候选" },
     },
@@ -244,7 +245,7 @@ export function sessionTools(
   const sessionInfo = defineTool({
     name: "redteam_session_info",
     description:
-      "查看**当前会话绑定的是哪个靶标**（会话 id、父会话、根会话、绑定链）。多会话同时开工时，先跑它确认自己没串到别人的靶标上。",
+      TOOL_DESCRIPTIONS.redteam_session_info,
     parameters: {},
     output: { schema: { type: "string" }, render: renderText },
     execute(_args, exec) {
@@ -264,7 +265,7 @@ export function sessionTools(
   const agentSlot = defineTool({
     name: "redteam_agent_slot",
     description:
-      "【主会话派活前后用】执行智能体的并发闸门：同一靶标**最多同时 3 个**在跑（可用 REDTEAM_MAX_AGENTS 配置）。action=status 看还剩几个名额与谁在跑；action=acquire 占一个名额（满了会直接拒绝，**不要重试硬塞**）；action=release 释放（子智能体结束时服务端也会自动释放）。",
+      TOOL_DESCRIPTIONS.redteam_agent_slot,
     parameters: {
       action: {
         type: "string",
@@ -384,7 +385,7 @@ export function sessionTools(
   const preflight = defineTool({
     name: "redteam_preflight",
     description:
-      "【开工前必须跑一次】平台技能与资源自检：逐个检查红队技能的必需环境变量（如 FOFA 测绘的 FOFA_KEY）、本机工具与二进制（suo5 / fscan / gogo / frp / 冰蝎 / 哥斯拉 / nmap / nuclei…）、外部基础设施（反弹 Shell 用的 VPS）。返回 available/broken 清单与每个坏掉的技能\"缺什么、怎么补\"。**缺 key / 缺 VPS 时直接向用户要，或改用替代方案，不要假装能跑。**",
+      TOOL_DESCRIPTIONS.redteam_preflight,
     parameters: {
       include: { type: "string", description: "只检查这些技能（逗号分隔）；省略则检查全部红队技能" },
     },
@@ -670,7 +671,7 @@ export function sessionTools(
   /* ── redteam_roles ──────────────────────────────────────────────────── */
   const roles = defineTool({
     name: "redteam_roles",
-    description: "列出红队角色及其职责标题（信息收集 / 漏洞检测 / 漏洞利用 / 内网渗透）。",
+    description: TOOL_DESCRIPTIONS.redteam_roles,
     parameters: {},
     output: { schema: { type: "string" }, render: renderText },
     execute() {
@@ -685,7 +686,7 @@ export function sessionTools(
   const rolePromptReset = defineTool({
     name: "redteam_role_prompt_reset",
     description:
-      "把角色系统提示词恢复为内置默认（新版模板）。老靶标想用上最新版角色提示词时用它；省略 role 则四个角色全部重置。",
+      TOOL_DESCRIPTIONS.redteam_role_prompt_reset,
     parameters: {
       engagement: { type: "string" },
       role: { type: "string", enum: ROLE_ORDER },

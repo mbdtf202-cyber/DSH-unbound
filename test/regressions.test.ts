@@ -112,10 +112,14 @@ describe("回归 BUG-3：engines 与实际运行时需求不符", () => {
     assert.ok(m, `engines.node 应当是可解析的 >=X.Y 形式，实际是 "${range}"`);
     const major = Number(m[1]);
     const minor = Number(m[2]);
-    // 之所以是 22.5：store 层用 node:sqlite，该模块自 22.5 起提供。
-    // 这正是原项目 BUG-3 的同一个坑（声明 >=18 实际要 22.5），不能重犯。
-    const ok = major > 22 || (major === 22 && minor >= 5) || major >= 23;
-    assert.equal(ok, true, `engines.node 至少 >=22.5（当前 "${range}"）`);
+    // 之所以是 22.15：GitHub Actions 各小版本实测结果
+    //   22.5 / 22.9 / 22.12 → node:sqlite 不存在（ERR_UNKNOWN_BUILTIN_MODULE）
+    //   22.15              → 有 sqlite，**无 FTS5**（走 store 的 LIKE 降级）
+    //   22.18+             → sqlite + FTS5 都有
+    // 声明 22.15 是「能跑」的下限；FTS5 缺失由降级路径处理（有专门测试）。
+    // 这正是原项目 BUG-3 的同一个坑（声明 >=18 实际要更高），不能重犯。
+    const ok = major > 22 || (major === 22 && minor >= 15);
+    assert.equal(ok, true, `engines.node 至少 >=22.15（当前 "${range}"）`);
   });
 
   it("产物引用的实验性模块必须在 engines 覆盖范围内", () => {

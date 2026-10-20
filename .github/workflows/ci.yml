@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ["22.x", "24.x"]
+        node: ["22.15", "22.x", "24.x"]
     steps:
       - uses: actions/checkout@v4
 
@@ -66,17 +66,20 @@ jobs:
           node dist/cli/index.js targets --ai-base /nonexistent || true
 
   min-node:
-    name: min supported node (22.5)
+    name: min supported node (22.15)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.5"
+          node-version: "22.15"
           cache: npm
       - run: npm ci --no-audit --no-fund
-      # engines 声明 >=22.5，这里就实际在 22.5 上跑一遍，
-      # 防止声明与实际能力脱节（原项目 BUG-3 的同一个坑）。
+      # engines 声明 >=22.15，这里实际在该版本跑一遍。
+      # 依据 GitHub Actions 实测矩阵：
+      #   node:sqlite  从 22.15 起存在（22.5/22.9/22.12 均 ERR_UNKNOWN_BUILTIN_MODULE）
+      #   FTS5         从 22.18 起存在（22.15 无 fts5 → store 走 LIKE 降级）
+      # 所以 22.15 是「能用但覆盖降级路径」的关键版本，必须进矩阵。
       - run: npm run typecheck
       - run: npm test
 

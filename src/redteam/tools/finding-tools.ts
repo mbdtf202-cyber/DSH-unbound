@@ -17,6 +17,7 @@
 import type { ToolExecContext } from "../../host-api/types.js";
 import { PLANNER_ROLE } from "../store/constants.js";
 import { agentOf, resolveEngagement } from "./context.js";
+import { TOOL_DESCRIPTIONS } from "./descriptions.js";
 import { defineTool, renderText, toToolJson } from "./define.js";
 import type { AnyTypedTool } from "./define.js";
 import type { StoreForTools } from "./store-contract.js";
@@ -37,7 +38,7 @@ export function findingTools(store: StoreForTools, ctx: ToolRuntimeContext): rea
   const vulnAdd = defineTool({
     name: "redteam_vuln_add",
     description:
-      "记录一条漏洞发现（漏洞检测角色）。带 cve 时按 (asset_id, cve, target) 幂等更新。severity：critical|high|medium|low|info；status：candidate（待验证）|confirmed（已验证）|false-positive|exploited|fixed。必须附证据（请求/响应片段、复现命令、证据文件路径）。",
+      TOOL_DESCRIPTIONS.redteam_vuln_add,
     parameters: {
       engagement: { type: "string" },
       agent: AGENT_PARAM,
@@ -74,7 +75,7 @@ export function findingTools(store: StoreForTools, ctx: ToolRuntimeContext): rea
   /* ── redteam_vuln_query ─────────────────────────────────────────────── */
   const vulnQuery = defineTool({
     name: "redteam_vuln_query",
-    description: "检索漏洞库：按严重级、状态、CVE、资产、C 段或关键词过滤。用于挑选待利用目标或核对误报。",
+    description: TOOL_DESCRIPTIONS.redteam_vuln_query,
     parameters: {
       engagement: { type: "string" },
       severity: { type: "string", enum: SEVERITY_ENUM },
@@ -108,7 +109,7 @@ export function findingTools(store: StoreForTools, ctx: ToolRuntimeContext): rea
   const vulnUpdate = defineTool({
     name: "redteam_vuln_update",
     description:
-      "更新漏洞状态/严重级/证据（例如验证后置为 confirmed、利用成功后置为 exploited、误报置为 false-positive）。",
+      TOOL_DESCRIPTIONS.redteam_vuln_update,
     parameters: {
       engagement: { type: "string" },
       id: { type: "number", required: true, description: "漏洞 id" },
@@ -138,7 +139,7 @@ export function findingTools(store: StoreForTools, ctx: ToolRuntimeContext): rea
   const credentialAdd = defineTool({
     name: "redteam_credential_add",
     description:
-      "记录一条凭据（漏洞利用/内网渗透角色）。**必须把口令/密钥明文写进 secret_value**——面板要直接显示明文供随时复用；同时用 secret_ref 指向 runs/ 下的证据文件。注意：本库只在本机，禁止把库文件或导出内容提交到任何仓库。",
+      TOOL_DESCRIPTIONS.redteam_credential_add,
     parameters: {
       engagement: { type: "string" },
       agent: AGENT_PARAM,
@@ -167,7 +168,7 @@ export function findingTools(store: StoreForTools, ctx: ToolRuntimeContext): rea
   /* ── redteam_credential_list ────────────────────────────────────────── */
   const credentialList = defineTool({
     name: "redteam_credential_list",
-    description: "列出已收集的凭据（含明文 secret_value），用于凭据复用与横向移动。",
+    description: TOOL_DESCRIPTIONS.redteam_credential_list,
     parameters: {
       engagement: { type: "string" },
       host: { type: "string" },
@@ -191,7 +192,7 @@ export function findingTools(store: StoreForTools, ctx: ToolRuntimeContext): rea
   const accessAdd = defineTool({
     name: "redteam_access_add",
     description:
-      "记录一次成功获得的访问会话（横向移动起点）。method 例如 vnc/rdp/ssh/web-shell/webshell/db；privilege 例如 admin/user/system。",
+      TOOL_DESCRIPTIONS.redteam_access_add,
     parameters: {
       engagement: { type: "string" },
       host: { type: "string", required: true },
@@ -216,7 +217,7 @@ export function findingTools(store: StoreForTools, ctx: ToolRuntimeContext): rea
   /* ── redteam_access_list ────────────────────────────────────────────── */
   const accessList = defineTool({
     name: "redteam_access_list",
-    description: "列出已获得的访问会话。",
+    description: TOOL_DESCRIPTIONS.redteam_access_list,
     parameters: {
       engagement: { type: "string" },
       host: { type: "string" },
@@ -236,7 +237,7 @@ export function findingTools(store: StoreForTools, ctx: ToolRuntimeContext): rea
   const shotAdd = defineTool({
     name: "redteam_shot_add",
     description:
-      "登记一张证据截图：把图片拷进靶标目录并关联到得分点/命中（面板展开得分点即可看图，报告里也会嵌入）。批量得分点（如终端权限）每个得分点最多展示 3 张代表图，不必逐台截图。",
+      TOOL_DESCRIPTIONS.redteam_shot_add,
     parameters: {
       engagement: { type: "string" },
       agent: AGENT_PARAM,
@@ -265,7 +266,7 @@ export function findingTools(store: StoreForTools, ctx: ToolRuntimeContext): rea
   /* ── redteam_shot_list ──────────────────────────────────────────────── */
   const shotList = defineTool({
     name: "redteam_shot_list",
-    description: "列出已登记的证据截图（含所属得分点、目标、类型、落盘文件）。",
+    description: TOOL_DESCRIPTIONS.redteam_shot_list,
     parameters: {
       engagement: { type: "string" },
       point_code: { type: "string" },
@@ -290,7 +291,7 @@ export function findingTools(store: StoreForTools, ctx: ToolRuntimeContext): rea
   /* ── redteam_shot_delete ────────────────────────────────────────────── */
   const shotDelete = defineTool({
     name: "redteam_shot_delete",
-    description: "删除一张证据截图（连同磁盘文件）。",
+    description: TOOL_DESCRIPTIONS.redteam_shot_delete,
     parameters: {
       engagement: { type: "string" },
       id: { type: "number", required: true, description: "shot id（redteam_shot_list 里返回的 id）" },
