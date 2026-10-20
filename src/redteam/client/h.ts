@@ -77,7 +77,10 @@ export type HtmlTag =
   | "dt"
   | "dd"
   | "fieldset"
-  | "legend";
+  | "legend"
+  /** 内联样式表。上游把演练台 CSS 作为 `<style>` 子节点挂在根元素里，
+   *  这样它的生命周期跟随组件（卸载即清理），不需要手动管 `document.head`。 */
+  | "style";
 
 /** CSS 值：字符串或数字（数字由 React 补 `px`，除少数无单位属性）。 */
 export type CssValue = string | number | undefined;

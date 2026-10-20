@@ -45,6 +45,7 @@ import {
 } from "./state.js";
 import { applyDrag, beginDrag, isPrimaryButton, shouldIgnoreDrag, dragOriginOf, type DragHost, type DragKind } from "./drag.js";
 import { exitFullWindow } from "./entry.js";
+import { CSS as DRILL_CSS, THEME as DRILL_THEME } from "./styles.js";
 
 /** 面板的 props。 */
 export interface PanelProps {
@@ -245,6 +246,12 @@ export function renderPanel(runtime: ConsoleRuntime, props: PanelProps, options:
     "data-open": shell.dataOpen,
     style: shell.style,
   },
+    // 样式表作为子节点挂在面板根里（与上游一致）：
+    // 用 `<style>` 元素而不是手动 `document.head.append`，好处是生命周期
+    // 跟随组件 —— 面板卸载时样式一起消失，不会在宿主里留下孤儿样式
+    // （热重载会反复挂载，留孤儿会让样式表无限增长）。
+    // 顺序有意义：CSS 在前、THEME 在后，后者覆盖前者。
+    h("style", { key: "styles" }, DRILL_CSS + "\n\n" + DRILL_THEME),
     // 拖拽把手只在外壳为 dock 时出现（embedded / full 没有）。
     showChrome
       ? h("div", { className: "rt-grip", title: "拖动调整宽度" })

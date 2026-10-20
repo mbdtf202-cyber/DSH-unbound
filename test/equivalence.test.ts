@@ -16,10 +16,12 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { applyPatchToText } from "../src/engine/text.js";
 import { loadBundledPatches } from "../src/patches/load.js";
+import { findUpstreamRoot } from "./helpers/upstream.js";
 
 const QILIN_CANDIDATES = [
-  "/Users/raki/Documents/deepseek-harness/default-workspace/dsh-qilin",
-  path.join(import.meta.dirname, "..", "..", "dsh-qilin"),
+  // 不写死作者机器路径：由 helpers/upstream 按 DSH_QILIN_ROOT / 同级检出 / 子目录顺序解析。
+  // 早期这里写死绝对路径，导致 CI 上对照测试直接 ERR_MODULE_NOT_FOUND 崩掉整个 job。
+  ...(findUpstreamRoot() === null ? [] : [findUpstreamRoot() as string]),
 ];
 
 function findQilin(): string | null {

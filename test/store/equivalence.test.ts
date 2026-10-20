@@ -24,10 +24,17 @@ import { after, describe, it } from "node:test";
 import { createRequire } from "node:module";
 
 import { RedteamStore } from "../../src/redteam/store/index.js";
+import { skipReason, upstreamFile } from "../helpers/upstream.js";
 import { makeTempStore, sampleBundle } from "./fixtures.js";
 
-/* 上游是 ESM（`"type": "module"`），用动态 import + 变量路径避开类型解析 */
-const UPSTREAM_PATH = "/Users/raki/Documents/deepseek-harness/default-workspace/dsh-qilin/lib/redteam/store-core.js";
+/**
+ * 上游模块路径由 helpers/upstream 统一解析（不写死绝对路径）。
+ *
+ * 早期这里写死了作者机器上的路径，导致 CI 上本文件 `ERR_MODULE_NOT_FOUND`
+ * 直接崩掉整个 job —— 也就是说本项目"最硬的验证"只能在作者机器上跑。
+ * 现在：找不到上游就 skip 全部用例，并输出原因（见 helpers/upstream.ts）。
+ */
+const UPSTREAM_PATH = upstreamFile("lib", "redteam", "store-core.js");
 
 /** 上游的最小类型形状（只声明本测试真的会调到的方法）。 */
 interface UpstreamStore {
@@ -85,7 +92,16 @@ interface UpstreamModule {
 
 /** 上游模块（懒加载，只加载一次）。 */
 let upstreamModule: UpstreamModule | null = null;
+/** 上游不可用时抛这个，让用例以"跳过"而非"失败"结束。 */
+class UpstreamUnavailable extends Error {
+  constructor() {
+    super(skipReason());
+    this.name = "UpstreamUnavailable";
+  }
+}
+
 async function loadUpstream(): Promise<UpstreamModule> {
+  if (UPSTREAM_PATH === null) throw new UpstreamUnavailable();
   if (upstreamModule === null) {
     upstreamModule = (await import(UPSTREAM_PATH)) as unknown as UpstreamModule;
   }
