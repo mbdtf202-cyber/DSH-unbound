@@ -164,6 +164,9 @@ export function renderSkillsTab(runtime: ConsoleRuntime, props: SkillsTabProps):
   const groups = groupSkills(filtered);
   const dirs = meta === null ? [] : visibleDirs(meta);
 
+  // 徽章全显示（`共 N` / `本插件 N` / `可用 N` / `不可用 N` / `未知 N`）：
+  // 这些是既定的外观契约（测试按语义断言），不要为省宽度把它们藏进 title。
+  // 620px 下靠 THEME 收紧 badge 内边距与 gap 排成一行。
   const toolbar = h("div", { className: "rt-toolbar" },
     h("span", { style: { fontWeight: 600 } }, "技能库"),
     h("span", { className: "rt-tag" }, "共 " + items.length + " 个"),
@@ -174,10 +177,16 @@ export function renderSkillsTab(runtime: ConsoleRuntime, props: SkillsTabProps):
       ? h("span", { className: "rt-avail rt-avail-available" }, "可用 " + summary.available)
       : null,
     summary !== null && summary.broken > 0
-      ? h("span", { className: "rt-avail rt-avail-broken" }, "不可用 " + summary.broken)
+      ? h("span", {
+          className: "rt-avail rt-avail-broken",
+          title: "这些技能跑不起来：缺工具或正文读不到。勾选下方「只看不可用」查看",
+        }, "不可用 " + summary.broken)
       : null,
     summary !== null && summary.unknown > 0
-      ? h("span", { className: "rt-avail rt-avail-unknown" }, "未知 " + summary.unknown)
+      ? h("span", {
+          className: "rt-avail rt-avail-unknown",
+          title: "判不了可用性（正文读不到）。勾选下方「只看不可用/未知」查看",
+        }, "未知 " + summary.unknown)
       : null,
     h("div", { className: "rt-spacer" }),
     h("button", {
@@ -261,23 +270,31 @@ export function renderSkillsTab(runtime: ConsoleRuntime, props: SkillsTabProps):
         items.length === 0 ? "没有技能（本包 skills/redteam 目录为空）" : "没有匹配的技能")
     : null;
 
-  return h("div", { className: "rt-split" },
-    h("div", { className: "rt-list" },
-      // 工具栏必须进树 —— 它是「共 N 个 / 本插件 N / 可用性徽章 / 刷新」的唯一载体。
-      // 原实现漏了这一行，导致 `toolbar` 成了死代码：标题、徽章、刷新按钮全不渲染，
-      // 8 个用例（标题/徽章/刷新点击/读取中/title 提示/null 态结构稳定/端到端）因此失败。
-      toolbar,
-      searchBox,
+  // 工具栏横跨整宽，放在分栏**之上**而不是塞进左侧 210px 列表里：
+  // 塞进窄栏会把「技能库 / 共 N 个 / 本插件 N / 可用 N / 不可用 N / 刷新」
+  // 折成三行，把列表挤到看不见（真实渲染截图确认过）。
+  return h("div", {
+    className: "rt-kb-wrap",
+    style: { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 },
+  },
+    // 工具栏必须进树 —— 它是「共 N 个 / 本插件 N / 可用性徽章 / 刷新」的唯一载体。
+    // 原实现漏了这一行，导致 `toolbar` 成了死代码：标题、徽章、刷新按钮全不渲染，
+    // 8 个用例（标题/徽章/刷新点击/读取中/title 提示/null 态结构稳定/端到端）因此失败。
+    toolbar,
+    h("div", { className: "rt-split" },
+      h("div", { className: "rt-list" },
+        searchBox,
       pluginCheckbox,
       brokenCheckbox,
       dirChips,
       errorNode,
       restartNode,
       emptyNode,
-      groupNode("红队技能", groups.redteam, "head-redteam"),
-      groupNode("官方技能", groups.official, "head-official"),
+        groupNode("红队技能", groups.redteam, "head-redteam"),
+        groupNode("官方技能", groups.official, "head-official"),
+      ),
+      h("div", { className: "rt-main" }, detailPane(runtime, props)),
     ),
-    h("div", { className: "rt-main" }, detailPane(runtime, props)),
   );
 }
 

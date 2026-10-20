@@ -1,12 +1,14 @@
+import type { MinimalStyleElement } from "./dom.js";
+
 /**
- * 演练台样式层：上游样式表（原样保真）+ 战术主题叠加层。
+ * 演练台样式层：上游样式表（逐字节保真）+ 战术主题叠加层。
  *
- * ## 为什么这个文件是「两块」而不是「一块改好的样式表」
+ * ## 这个文件为什么是「两块」而不是「一块改好的样式表」
  *
- * 上游 `dsh-qilin/client.js` 里有一整套演练台样式表（539 行 / 422 条规则），
- * 它是这个控制台**唯一**的视觉定义 —— 布局、密度、状态色、表格列宽全在里面。
- * TypeScript 重写时逻辑迁过来了、样式没迁，所以有一段时间控制台是「有结构、
- * 无外观」的。
+ * 上游 `dsh-qilin/client.js` 里有一整套演练台样式表（539 行 / 45,782 字节 /
+ * 422 条规则），它是这个控制台**唯一**的视觉定义 —— 布局、密度、状态色、
+ * 表格列宽全在里面。TypeScript 重写时逻辑迁过来了、样式没迁，所以有一段时间
+ * 控制台是「有结构、无外观」的。
  *
  * 补的时候有两条路：
  *
@@ -14,20 +16,27 @@
  * 2. 原样保真 + 叠加：`CSS` 一个字节不动，`THEME` 单独一层覆盖。
  *
  * 选 2。理由：
+ *
  * - 上游样式表是**对照测试的依据** —— 把它改了，「行为等价」就无从验证。
- *   以后做 drift 检测也要靠它逐字比对。
+ *   以后做 drift 检测（上游又改了样式、我们没跟上）也要靠它逐字比对。
  * - 新视觉是**演进的**，会反复调。叠加层改动只需 diff `THEME`，
- *   不会把上游 422 条规则搅成一片红绿。
+ *   不会把上游 422 条规则搅成一片红绿，review 也就看得清。
  * - 层叠顺序天然正确：`CSS` 先注入、`THEME` 后注入，后者赢。
+ *   叠加层因此**只叠加、不改写** —— 它不复制任何上游规则，只覆盖需要变的属性。
  *
  * ## 为什么可以安全内联进 `String.raw`
  *
- * 已校验 `CSS` 的内容：**0 个反引号、0 个 `\${`、0 个反斜杠**。
- * 三者任一出现都会让模板字符串截断或转义走样，所以这不是「运气好」，
- * 是提取时确认过的前提（见 `test/ui/styles.test.ts` 里对应的断言）。
+ * 提取时就校验过 `CSS` 的内容：**0 个反引号、0 个 ${、0 个反斜杠**。
+ * 三者任一出现都会让模板字符串截断或转义走样（TS 照样编译通过，只是样式
+ * 少了半截 —— 这种 bug 肉眼极难发现）。所以这不是「运气好」，是前提，
+ * 而且由 `test/ui/styles.test.ts` 逐条断言锁住：将来上游样式里混进反引号，
+ * 测试会先红，而不是运行时静默少样式。
+ *
+ * `THEME` 由我们手写，同样遵守这三条，于是两个常量可以分别内联，
+ * 不需要任何转义。
  */
 
-/** 宿主 `--dsw-alias-*` 令牌白名单（`CSS` 段用到的 9 个）。 */
+/** 上游 `CSS` 段实际引用到的宿主令牌（9 个，按出现频次排列）。 */
 export const UPSTREAM_TOKENS: readonly string[] = Object.freeze([
   "--dsw-alias-label-secondary",
   "--dsw-alias-border-l1",
@@ -41,34 +50,63 @@ export const UPSTREAM_TOKENS: readonly string[] = Object.freeze([
 ]);
 
 /**
- * `THEME` 允许引用的宿主令牌全集。
+ * `THEME` 允许引用的宿主令牌全集 = 上游那 9 个 + 官方确实存在的扩展档。
  *
- * 只列**宿主里真实存在**的令牌：拼错一个不存在的名字，`var()` 会静默失败
- * （回落成非法值或空），样式悄悄不生效，比报错难查得多。
+ * 为什么要有白名单：`var(--dsw-xxx)` 拼错**不会报错**，只会静默失效
+ * （整条声明被丢弃）。这类错误在浏览器里表现为「某个样式没生效」，
+ * 归因成本极高。所以把允许的名字写成常量，测试用集合断言把不在名单里的
+ * 名字打出来 —— 拼错当场红。
+ *
+ * 名单逐条核对过宿主 `dsh-client-ui-theme`：`alias-bg-layer-3/4`、
+ * `alias-bg-overlay`、`alias-label-tertiary`、`alias-border-l3/l4`、
+ * `alias-state-warn/success-primary`、`radius-sm/md/lg`、`elevation-soft`、
+ * 以及 `--dsw-static-*` 色阶（本文件只用到 amber-400/600、blue-300/500）。
  */
 export const THEME_TOKENS: readonly string[] = Object.freeze([
   // 上游已在用的 9 个
   ...UPSTREAM_TOKENS,
-  // THEME 额外用到的（均已核对存在于 dsh-client-ui-theme）
+  // 层级 / 描边 / 文本：深色下靠底色阶与细线分层，不堆阴影
   "--dsw-alias-bg-layer-3",
   "--dsw-alias-bg-layer-4",
   "--dsw-alias-bg-overlay",
   "--dsw-alias-label-tertiary",
   "--dsw-alias-border-l3",
   "--dsw-alias-border-l4",
+  // 语义状态：严重度的 fg 全部从这里派生，不自己发明红色
   "--dsw-alias-state-warn-primary",
   "--dsw-alias-state-success-primary",
+  // 圆角与浮层阴影：宿主已按主题算好，直接跟随
+  "--dsw-radius-sm",
+  "--dsw-radius-md",
+  "--dsw-radius-lg",
+  "--dsw-elevation-soft",
+  // 静态色阶：只用于「muted 档需要独立色相」的两处（amber=medium、blue=low）
+  "--dsw-static-amber-400",
+  "--dsw-static-amber-600",
+  "--dsw-static-blue-300",
   "--dsw-static-blue-500",
-  "--dsw-static-neutral-bluish-1000",
-  "--dsw-static-neutral-bluish-50",
 ]);
 
 /**
- * 上游演练台样式表 —— **逐字节保真，不要格式化、不要"顺手改好"**。
+ * 令牌白名单（测试用）= `THEME_TOKENS` 的集合形态。
  *
- * 来源：`dsh-qilin/client.js` 中 `const CSS = \`…\`` 的整块内容，
- * 起于 `.rt-dock{…}`，止于 `.rt-shot-zoom-cap{…}`。
+ * 单独导出这个名字，是为了让断言读起来是「引用集 ⊆ 白名单」，
+ * 而不是「引用集 ⊆ THEME_TOKENS」—— 后者容易被误读成「THEME 里出现过的」。
  */
+export const TOKEN_WHITELIST: ReadonlySet<string> = new Set(THEME_TOKENS);
+
+/**
+ * 上游演练台样式表 —— **逐字节保真，不要格式化、不要「顺手改好」**。
+ *
+ * 来源：`dsh-qilin/client.js` 中演练台样式表的整块内容，
+ * 起于 `.rt-dock{…}`，止于 `.rt-shot-zoom-cap{…}`。
+ * 539 行 / 45,782 字节 / 422 条规则。
+ *
+ * 开头那个换行是**内容的一部分**（上游原文以换行开头），不是排版。
+ * 若编辑器或格式化工具把它删了，行数与字节数都会变，对照测试会红
+ * —— 这就是「保真」的可执行含义。
+ */
+
 export const CSS = String.raw`
 .rt-dock{position:fixed;top:12px;right:12px;z-index:20;display:flex;flex-direction:column;box-sizing:border-box;
   background:color-mix(in srgb,var(--dsw-alias-bg-layer-1,#1c1c1c) 52%,transparent);
@@ -610,306 +648,519 @@ export const CSS = String.raw`
 .rt-shot-zoom-cap{color:#e5e7eb;font-size:12px;text-align:center;max-width:90vw;overflow-wrap:anywhere}`;
 
 /**
- * 战术主题叠加层。
+ * 战术主题叠加层 —— **只叠加、不改写**（注入顺序排在 `CSS` 之后）。
  *
  * ## 设计方向
  *
  * 「贴官方令牌 + 战术仪表盘感」。宿主的主色在两个主题下都是**近中性**的
- * （浅色 `--dsw-alias-brand-primary` = `#0f1115`，深色 = `#f9fafb`），
- * 没有彩色主色可用 —— 所以「作战台」的感觉不能靠大色块，只能靠四件事：
+ * （浅色 `--dsw-alias-brand-primary` 是深灰、深色是近白），没有彩色主色可用
+ * —— 所以「作战台」的感觉不能靠大色块，只能靠四件事：
  *
- * 1. **密度**：行高 29px、表头 25px，比默认更紧，一屏多装三分之一。
- * 2. **等宽数字**：端口 / 分值 / 计数 / 时间戳全部 `tabular-nums`，
- *    列与列之间数字对齐，扫读时眼睛不用重新找位置。
- * 3. **语义状态色**：五档严重度 + 六档测试状态，颜色只承担「轻重」，
- *    不承担装饰。
- * 4. **1px 细线分隔**：用 `--dsw-alias-border-l1` 切块，不用阴影堆叠。
+ * 1. **密度**：行高 29px、表头 25px，比宿主默认紧一档，一屏多装约三分之一行。
+ * 2. **等宽数字**：端口 / 分值 / 计数 / 时间戳一律 `tabular-nums`，
+ *    列与列之间数字对齐，扫读时眼睛不用为「7 比 1 窄」重新找位置。
+ * 3. **语义状态色**：五档严重度各三件（fg / bg / border），三件永远同源
+ *    —— 换主题只重声明，不会出现「字红了底还是绿的」。
+ * 4. **1px 细线分层**：用 `--dsw-alias-border-l1/l2` 切块，不堆阴影。
  *
- * ## ⚠ 一个必须遵守的层叠陷阱（实测踩过）
+ * 硬约束：**不硬编码任何主色**。THEME 里没有一处十六进制色值，
+ * 全部走 `var(--dsw-*)` 或从它 `color-mix()` 派生（有测试守着）。
+ *
+ * ## 一个必须遵守的层叠陷阱（实测踩过，别再踩）
  *
  * CSS 自定义属性的 `var()` 在**声明处**就完成替换，值再沿树继承。
+ * 宿主把深色主题加在 **`body`** 上，而 `:root` 是 **`html`**，于是：
  *
- * 宿主把深色主题加在 **`body`** 上（`body[data-ds-dark-theme]`），
- * 而 `:root` 是 **`html`**。所以：
+ *     :root { --dsw-alias-state-error-primary: 浅色值;
+ *             --dsu-sev-critical-fg: var(--dsw-alias-state-error-primary); }  // 浅色值被冻结
+ *     [data-ds-dark-theme] { --dsw-alias-state-error-primary: 深色值; }       // body 上覆盖了
  *
- * ```css
- * :root { --dsw-alias-state-error-primary: #ec1313;
- *         --dsu-sev-critical-fg: var(--dsw-alias-state-error-primary); }  // → #ec1313 被冻结
- * [data-ds-dark-theme] { --dsw-alias-state-error-primary: #f87171; }       // body 上覆盖了
- * ```
- *
- * 结果 `body` 上 alias 确实是 `#f87171`，但 `--dsu-sev-critical-fg` 仍是
- * **`#ec1313`**（在 html 上算好并继承下来的），所有消费它的规则在深色下
- * 用浅色值 —— 静默错色，肉眼在深色背景上看着像"红色偏暗"，很难归因。
- *
- * 实测证据（Playwright 取 computed style）：
- * ```
- * dark: body 上 --dsw-alias-state-error-primary = #f87171
- *       :root 上 --dsu-sev-critical-fg           = #ec1313   ← 没跟着变
- *       .rt-sev-critical 渲染色                   = rgb(236,19,19)
- * ```
+ * 结果 `body` 上 alias 确实是深色值，但 `--dsu-sev-critical-fg` 仍是浅色值
+ * （在 html 上算好并继承下来的），消费它的规则在深色下一律用浅色 —— 静默错色。
  *
  * **因此**：任何 `var(--dsw-alias-*)` 派生的 `--dsu-*`，都必须在深色块里
- * **重声明一遍**。`test/ui/styles.test.ts` 用集合断言锁住这件事
- * （派生变量集 ⊆ 深色块重声明集），以后谁漏写就红。
+ * **整组重声明一遍**（只重声明 fg 会得到「深色字压浅色底」，更难读）。
+ * 不依赖主题的派生变量（spacing / radius / 字体栈 / 行高梯度）只在 `:root`
+ * 声明一次即可 —— 它们不引用 alias，不会被冻结。
  *
- * 不依赖主题的派生变量（spacing / radius / 字体栈）只在 `:root` 声明一次即可。
+ * ## 深色选择器为什么写两遍
+ *
+ * 宿主两套写法都用过：`<html data-ds-dark-theme>` 与 `<body data-ds-dark-theme>`。
+ * 只覆盖一种，另一种主题下就完全不补偿。两个选择器并列在同一条规则里，
+ * 值只写一份。
  */
+
 export const THEME = String.raw`/* ═══════════════════════════════════════════════════════════════════════
-   设计变量阶梯 —— 不依赖主题，只在 :root 声明一次
-   理由：spacing / radius / 字体栈 / 行高在明暗下是同一套值，
-   放进深色块重声明只会增加噪音（且它们不引用 --dsw-alias-*，不会被冻结）。
+   0. 设计变量阶梯
+   ─────────────────────────────────────────────────────────────────────
+   先立梯子再写规则：所有间距 / 圆角 / 字号 / 行高 / 字重都从这里取，
+   规则里不再出现裸数字。改一档 = 改一行，不会在 400 条规则里做手术。
+
+   这一块**不依赖主题**（不引用 --dsw-alias-*），所以只在 :root 声明一次，
+   不需要在深色块里重声明。
    ═══════════════════════════════════════════════════════════════════════ */
 :root{
-  /* 依赖主题的值也要在 :root 给一份，供**非 body 继承链**（如 portal 到 body
-     之外的元素、测试环境直接挂 documentElement）使用。 */
+  /* 间距：4 的倍数一档，够密也分得开 */
   --dsu-space-1:4px;--dsu-space-2:6px;--dsu-space-3:8px;
   --dsu-space-4:12px;--dsu-space-5:16px;--dsu-space-6:24px;
-  --dsu-radius-xs:4px;--dsu-radius-sm:6px;--dsu-radius-md:8px;--dsu-radius-lg:12px;
-  --dsu-font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
-  --dsu-font-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+
+  /* 圆角：xs 给徽章，sm 给按钮/输入，md 给卡片，lg 给面板壳。
+     sm 及以上直接跟随宿主令牌（带像素回落，宿主换皮时不至于塌掉）；
+     xs 宿主没有对应档位，用固定 4px —— 不引用不存在的令牌名。 */
+  --dsu-radius-xs:4px;
+  --dsu-radius-sm:var(--dsw-radius-sm,6px);
+  --dsu-radius-md:var(--dsw-radius-md,8px);
+  --dsu-radius-lg:var(--dsw-radius-lg,12px);
+  /* 浮层阴影：宿主已按主题算好，直接借用，避免自己拼写死黑色 */
+  --dsu-shadow-soft:var(--dsw-elevation-soft);
+
+  /* 字体栈：UI 走系统栈（宿主没暴露字体令牌，不硬拼不存在的名字），数字列走等宽 */
+  --dsu-font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --dsu-font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+
+  /* 字号梯度：micro 给徽章，tiny 给表格数字，small 给页签，body 给正文 */
   --dsu-fs-micro:10.5px;--dsu-fs-tiny:11px;--dsu-fs-small:11.5px;
-  --dsu-fs-body:12.5px;--dsu-fs-lead:13px;
+  --dsu-fs-body:12.5px;--dsu-fs-lead:13px;--dsu-fs-title:15px;
+
+  /* 行高梯度：徽章=1（垂直居中不飘），表格行=tight，正文=base，长文本=loose */
+  --dsu-lh-none:1;--dsu-lh-tight:1.28;--dsu-lh-base:1.5;--dsu-lh-loose:1.7;
+
+  /* 字重梯度：表头 semi、数字 semi、标题 bold、普通 400 */
+  --dsu-fw-regular:400;--dsu-fw-medium:500;--dsu-fw-semi:600;--dsu-fw-bold:650;
+
+  /* 垂直节奏：表体 29 / 表头 25，比宿主默认紧一档，一屏多装约三分之一行 */
   --dsu-row-h:29px;--dsu-row-h-head:25px;
-  --dsu-line:1px solid var(--dsw-alias-border-l1);
+  --dsu-cell-py:5px;--dsu-cell-px:10px;
 
-  /* 五档严重度（浅色） */
+  /* ── 以下派生变量引用了 --dsw-alias-*，**深色块必须重声明**
+        （var() 在声明处替换，:root 上算好的值会被浅色冻结，详见文件头注释） */
+  --dsu-line:1px solid var(--dsw-alias-border-l1);
+  --dsu-hover-bg:color-mix(in srgb,var(--dsw-alias-bg-layer-3) 45%,var(--dsw-alias-bg-layer-2));
+  --dsu-selected-bg:color-mix(in srgb,var(--dsw-alias-bg-layer-4,var(--dsw-alias-bg-layer-3)) 55%,var(--dsw-alias-bg-layer-2));
+
+  /* ── 五档严重度（浅色）：fg 取语义色的本体，bg/border 从同一色混出来
+        这样三件套永远同源 —— 换主题只需重声明，不会出现「字红了底还是绿的」 */
   --dsu-sev-critical-fg:var(--dsw-alias-state-error-primary);
   --dsu-sev-critical-bg:color-mix(in srgb,var(--dsw-alias-state-error-primary) 11%,transparent);
   --dsu-sev-critical-border:color-mix(in srgb,var(--dsw-alias-state-error-primary) 34%,transparent);
   --dsu-sev-high-fg:var(--dsw-alias-state-warn-primary);
   --dsu-sev-high-bg:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 13%,transparent);
   --dsu-sev-high-border:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 36%,transparent);
-  --dsu-sev-medium-fg:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 76%,var(--dsw-alias-label-primary));
-  --dsu-sev-medium-bg:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 10%,transparent);
-  --dsu-sev-medium-border:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 28%,transparent);
-  --dsu-sev-low-fg:color-mix(in srgb,var(--dsw-alias-label-primary) 62%,var(--dsw-alias-state-warn-primary));
-  --dsu-sev-low-bg:color-mix(in srgb,var(--dsu-sev-low-fg) 10%,transparent);
-  --dsu-sev-low-border:color-mix(in srgb,var(--dsu-sev-low-fg) 28%,transparent);
+  --dsu-sev-medium-fg:var(--dsw-static-amber-600);
+  --dsu-sev-medium-bg:color-mix(in srgb,var(--dsw-static-amber-600) 12%,transparent);
+  --dsu-sev-medium-border:color-mix(in srgb,var(--dsw-static-amber-600) 30%,transparent);
+  --dsu-sev-low-fg:var(--dsw-static-blue-500);
+  --dsu-sev-low-bg:color-mix(in srgb,var(--dsw-static-blue-500) 11%,transparent);
+  --dsu-sev-low-border:color-mix(in srgb,var(--dsw-static-blue-500) 30%,transparent);
   --dsu-sev-info-fg:var(--dsw-alias-label-tertiary);
   --dsu-sev-info-bg:color-mix(in srgb,var(--dsw-alias-label-tertiary) 10%,transparent);
   --dsu-sev-info-border:var(--dsw-alias-border-l2);
+
+  /* success 的浅色值要压深：宿主 green-500（浅色主题下的 success 值）在白底只有 2.28:1，
+     11px 小字不够（WCAG AA 要 4.5:1）。混入 label-primary（浅色下近黑）后约 5.1:1。
+     派生自 alias，所以深色块必须重声明（见下方层叠陷阱说明）。 */
+  --dsu-success-fg:color-mix(in srgb,var(--dsw-alias-state-success-primary) 62%,var(--dsw-alias-label-primary));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   深色：**所有引用 --dsw-alias-* 的派生变量都要在这里重声明**
-   不重声明就会被 :root 上的浅色值冻结（详见文件头注释的实测证据）。
+   1. 等宽数字
+   ─────────────────────────────────────────────────────────────────────
+   端口 / 分值 / 计数 / 时间戳一律 tabular-nums：数字列等宽，扫读时
+   眼睛不用为「7 比 1 窄」重新找位置。.rt-sev 家族也带上（分值徽章里是数字）。
    ═══════════════════════════════════════════════════════════════════════ */
-[data-ds-dark-theme],
-body[data-ds-dark-theme]{
-  --dsu-sev-critical-fg:var(--dsw-alias-state-error-primary);
-  --dsu-sev-critical-bg:color-mix(in srgb,var(--dsw-alias-state-error-primary) 11%,transparent);
-  --dsu-sev-critical-border:color-mix(in srgb,var(--dsw-alias-state-error-primary) 34%,transparent);
-  --dsu-sev-high-fg:var(--dsw-alias-state-warn-primary);
-  --dsu-sev-high-bg:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 13%,transparent);
-  --dsu-sev-high-border:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 36%,transparent);
-  --dsu-sev-medium-fg:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 88%,var(--dsw-alias-label-primary));
-  --dsu-sev-medium-bg:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 12%,transparent);
-  --dsu-sev-medium-border:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 30%,transparent);
-  --dsu-sev-low-fg:color-mix(in srgb,var(--dsw-alias-label-primary) 62%,var(--dsw-alias-state-warn-primary));
-  --dsu-sev-low-bg:color-mix(in srgb,var(--dsu-sev-low-fg) 14%,transparent);
-  --dsu-sev-low-border:color-mix(in srgb,var(--dsu-sev-low-fg) 32%,transparent);
-  --dsu-sev-info-fg:var(--dsw-alias-label-tertiary);
-  --dsu-sev-info-bg:color-mix(in srgb,var(--dsw-alias-label-tertiary) 10%,transparent);
-  --dsu-sev-info-border:var(--dsw-alias-border-l2);
-  --dsu-line:1px solid var(--dsw-alias-border-l1);
-}
-
-/* ═══════════════════════════════════════════════════════════════════════
-   密度与等宽数字 —— 战术感的两个主要来源
-   ═══════════════════════════════════════════════════════════════════════ */
-
-/* 数字列一律等宽对齐：端口、分值、计数、时间戳、IP */
-.rt-mono,.rt-ip,.rt-tag,.rt-sev,.rt-score-pts,.rt-score-big,.rt-score-of,
-.rt-score-scope,.rt-score-group .rt-sg-sub,.rt-avail,.rt-step-time,
-.rt-step-dot,.rt-foot,.rt-sess-fact,.rt-kv b{
+.rt-mono,.rt-row,.rt-vrow,.rt-score-row,.rt-tag,
+.rt-sev,.rt-sev-critical,.rt-sev-high,.rt-sev-medium,.rt-sev-low,.rt-sev-info,
+.rt-ip,.rt-score-pts,.rt-score-scope,.rt-sg-sub,.rt-step-time,.rt-step-dot,
+.rt-foot,.rt-kv b,.rt-sess-fact b,.rt-cred-meta,.rt-hit-time{
   font-variant-numeric:tabular-nums;
 }
-.rt-tag,.rt-sev,.rt-avail{font-feature-settings:"tnum" 1}
+.rt-mono,.rt-score-pts,.rt-score-scope,.rt-step-time,.rt-step-dot,.rt-foot{
+  font-family:var(--dsu-font-mono);
+}
 
-/* 行高与表头高度收紧：一屏多装三分之一的信息 */
-.rt-row{min-height:var(--dsu-row-h);align-items:center;transition:background .1s}
-.rt-row.head{
+/* ═══════════════════════════════════════════════════════════════════════
+   2. 表格密度
+   ─────────────────────────────────────────────────────────────────────
+   三张表（资产 / 漏洞 / 得分）共用一套节奏：行高 29、表头 25、内边距 5/10。
+   hover 与选中态**全部从 --dsw-alias-bg-layer-* 混出来**，不写死色值 ——
+   浅色下是「更浅一层」，深色下自然变成「更亮一层」，同一套规则两边都成立。
+   ═══════════════════════════════════════════════════════════════════════ */
+.rt-row,.rt-vrow,.rt-score-row{
+  min-height:var(--dsu-row-h);
+  align-items:center;
+  line-height:var(--dsu-lh-tight);
+  padding-block:var(--dsu-cell-py);
+  padding-inline:var(--dsu-cell-px);
+  transition:background-color .12s ease;
+}
+.rt-row.head,.rt-vrow.head,.rt-score-row.head{
   min-height:var(--dsu-row-h-head);
-  text-transform:uppercase;letter-spacing:.045em;
+  text-transform:uppercase;
+  letter-spacing:.045em;
+  font-size:var(--dsu-fs-micro);
+  font-weight:var(--dsu-fw-semi);
   color:var(--dsw-alias-label-tertiary);
   border-bottom:1px solid var(--dsw-alias-border-l2);
 }
-.rt-vrow,.rt-score-row{min-height:27px;align-items:center}
-.rt-toolbar{padding:7px 10px}
-.rt-foot{
-  padding:6px 12px;font-family:var(--dsu-font-mono);font-size:var(--dsu-fs-tiny);
-}
-
-/* 选中态：细左轨 + 极淡底，避免整行变色的噪声 */
-.rt-row:hover,.rt-vrow:hover,.rt-score-row:hover,.rt-item:hover,.rt-seg:hover{
-  background:color-mix(in srgb,var(--dsw-alias-label-primary) 4%,transparent);
-}
-.rt-row.on,.rt-item.on,.rt-seg.on{
-  background:color-mix(in srgb,var(--dsw-alias-brand-primary) 7%,transparent);
+/* hover：整行提一层，不换色相（避免和严重度色抢注意力） */
+.rt-row:hover,.rt-vrow:hover,.rt-score-row:hover{background:var(--dsu-hover-bg)}
+.rt-row.head:hover,.rt-vrow.head:hover,.rt-score-row.head:hover{background:var(--dsw-alias-bg-layer-1)}
+/* 选中：细左轨 + 更亮一层，不整行填色 */
+.rt-row.on,.rt-vrow.on,.rt-score-row.on{
+  background:var(--dsu-selected-bg);
   box-shadow:inset 2px 0 0 var(--dsw-alias-brand-primary);
 }
+.rt-row.on:hover,.rt-vrow.on:hover,.rt-score-row.on:hover{
+  background:color-mix(in srgb,var(--dsu-selected-bg) 82%,var(--dsw-alias-bg-layer-3) 18%);
+}
+/* 得分命中：淡绿底只染行，勾选框与分值另给强调 */
+.rt-score-row.hit{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 8%,transparent)}
+.rt-score-row.hit .rt-score-pts{color:var(--dsw-alias-state-success-primary);font-weight:var(--dsu-fw-semi)}
 
-/* 页签：下划线用品牌色，未读红点描一圈，深色下也立得住 */
-.rt-tab{font-size:var(--dsu-fs-small);transition:color .12s,border-color .12s}
-.rt-tab.on{
-  font-weight:620;border-bottom-color:var(--dsw-alias-brand-primary);
-}
-.rt-tab-dot{
-  box-shadow:0 0 0 2px color-mix(in srgb,var(--dsu-sev-critical-fg) 24%,transparent);
-}
-
-/* 按钮：hover 用叠加而非换色，两个主题下都稳 */
-.rt-btn{
-  border-radius:var(--dsu-radius-sm);
-  transition:background .12s,border-color .12s;
-}
-.rt-btn:hover{
-  background:color-mix(in srgb,var(--dsw-alias-label-primary) 6%,var(--dsw-alias-bg-layer-2));
-  border-color:var(--dsw-alias-border-l3);
-}
-.rt-btn-primary{color:var(--dsw-alias-bg-base);font-weight:560}
-.rt-btn-primary:hover{opacity:.88}
+/* 单元格文本：正文行高，超长换行不截断（域名 / 口令 / 回显都要看全） */
+.rt-row,.rt-vrow,.rt-score-row,.rt-hit-row,.rt-cred,.rt-evi{overflow-wrap:anywhere}
 
 /* ═══════════════════════════════════════════════════════════════════════
-   语义状态色 —— 颜色只承担「轻重」，不承担装饰
+   3. 五档严重度落到 .rt-sev 家族
+   ─────────────────────────────────────────────────────────────────────
+   上游给 .rt-sev-* 写死了十六进制色值，深色下过曝。
+   这里接管成三件套变量 —— 同一档的 fg/bg/border 永远同源。
    ═══════════════════════════════════════════════════════════════════════ */
-.rt-sev{display:inline-flex;align-items:center;justify-content:center;
-  min-width:34px;height:17px;padding:0 5px;border-radius:var(--dsu-radius-xs);
-  font-size:var(--dsu-fs-micro);font-weight:620;
-  border:1px solid transparent;white-space:nowrap}
+.rt-sev{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:34px;height:17px;padding:0 var(--dsu-space-1);
+  border-radius:var(--dsu-radius-xs);
+  border:1px solid transparent;
+  font-family:var(--dsu-font-ui);
+  font-size:var(--dsu-fs-micro);
+  font-weight:var(--dsu-fw-semi);
+  line-height:var(--dsu-lh-none);
+  white-space:nowrap;
+}
 .rt-sev-critical{color:var(--dsu-sev-critical-fg);background:var(--dsu-sev-critical-bg);border-color:var(--dsu-sev-critical-border)}
 .rt-sev-high{color:var(--dsu-sev-high-fg);background:var(--dsu-sev-high-bg);border-color:var(--dsu-sev-high-border)}
 .rt-sev-medium{color:var(--dsu-sev-medium-fg);background:var(--dsu-sev-medium-bg);border-color:var(--dsu-sev-medium-border)}
 .rt-sev-low{color:var(--dsu-sev-low-fg);background:var(--dsu-sev-low-bg);border-color:var(--dsu-sev-low-border)}
 .rt-sev-info{color:var(--dsu-sev-info-fg);background:var(--dsu-sev-info-bg);border-color:var(--dsu-sev-info-border)}
+/* 严重度色条：与徽章同源，避免两处各写一份色 */
+.rt-sevbar{background:var(--dsu-sev-info-fg)}
+.rt-hit-row:has(.rt-sev-critical) .rt-sevbar{background:var(--dsu-sev-critical-fg)}
+.rt-hit-row:has(.rt-sev-high) .rt-sevbar{background:var(--dsu-sev-high-fg)}
 
-/* 测试状态：靠前置小圆点区分，不靠整块填色 */
-.rt-test{display:inline-flex;align-items:center;gap:4px;height:17px;padding:0 5px;
-  border-radius:var(--dsu-radius-xs);font-size:var(--dsu-fs-micro);white-space:nowrap;
-  border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-tertiary)}
-.rt-test::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;flex:none}
-.rt-test-testing{color:var(--dsu-sev-high-fg);border-color:var(--dsu-sev-high-border);background:var(--dsu-sev-high-bg)}
-.rt-test-testing::before{animation:rt-dsu-pulse 1.6s ease-in-out infinite}
-.rt-test-tested{color:var(--dsw-alias-state-success-primary);
-  border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 34%,transparent);
-  background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 10%,transparent)}
-.rt-test-blocked{color:var(--dsw-alias-bg-base);background:var(--dsu-sev-critical-fg);border-color:var(--dsu-sev-critical-fg)}
-.rt-test-no_surface{color:var(--dsu-sev-low-fg);border-color:var(--dsu-sev-low-border);background:var(--dsu-sev-low-bg)}
-@keyframes rt-dsu-pulse{0%,100%{opacity:1}50%{opacity:.35}}
-/* 尊重系统「减少动态效果」 */
-@media (prefers-reduced-motion:reduce){
-  .rt-test-testing::before{animation:none}
-  .rt-row,.rt-vrow,.rt-score-row,.rt-btn,.rt-item,.rt-seg,.rt-tab{transition:none}
+/* ═══════════════════════════════════════════════════════════════════════
+   4. 同族语义（易打性 / 可用性 / 来源标签）：复用五档，不新造颜色
+   ═══════════════════════════════════════════════════════════════════════ */
+.rt-pri{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:30px;height:17px;padding:0 var(--dsu-space-1);
+  border-radius:var(--dsu-radius-xs);
+  font-size:var(--dsu-fs-micro);
+  font-weight:var(--dsu-fw-semi);
+  line-height:var(--dsu-lh-none);
+  border:1px solid transparent;
 }
-
-/* 来源标签沿用上游配色，但底色从令牌派生，深色下不过曝 */
-.rt-tag{height:17px;border-radius:var(--dsu-radius-xs);font-size:var(--dsu-fs-micro)}
-.rt-tag-passive{color:var(--dsu-sev-low-fg);border-color:var(--dsu-sev-low-border);background:var(--dsu-sev-low-bg)}
-.rt-tag-active{color:var(--dsu-sev-high-fg);border-color:var(--dsu-sev-high-border);background:var(--dsu-sev-high-bg)}
-.rt-tag-live{color:var(--dsw-alias-state-success-primary);
-  border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 34%,transparent);
-  background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 10%,transparent)}
-.rt-tag-warn{color:var(--dsu-sev-critical-fg);border-color:var(--dsu-sev-critical-border);background:var(--dsu-sev-critical-bg)}
-
-/* 易打性 / 可用性 / 内外网：同族语义，复用五档 */
-.rt-pri{display:inline-flex;align-items:center;justify-content:center;
-  min-width:30px;height:17px;padding:0 5px;border-radius:var(--dsu-radius-xs);
-  font-size:var(--dsu-fs-micro);font-weight:620;border:1px solid transparent}
 .rt-pri-high{color:var(--dsu-sev-critical-fg);background:var(--dsu-sev-critical-bg);border-color:var(--dsu-sev-critical-border)}
 .rt-pri-medium{color:var(--dsu-sev-high-fg);background:var(--dsu-sev-high-bg);border-color:var(--dsu-sev-high-border)}
 .rt-pri-low{color:var(--dsu-sev-info-fg);background:var(--dsu-sev-info-bg);border-color:var(--dsu-sev-info-border)}
 
-.rt-avail{display:inline-flex;align-items:center;gap:3px;height:16px;padding:0 4px;
-  border-radius:var(--dsu-radius-xs);font-size:var(--dsu-fs-micro);font-weight:560;
-  border:1px solid transparent;white-space:nowrap}
-.rt-avail-available{color:var(--dsw-alias-state-success-primary);
-  border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 30%,transparent);
-  background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 10%,transparent)}
+.rt-tag,.rt-avail{
+  display:inline-flex;align-items:center;gap:var(--dsu-space-1);
+  height:17px;padding:0 var(--dsu-space-1);
+  border-radius:var(--dsu-radius-xs);
+  border:1px solid var(--dsw-alias-border-l2);
+  font-size:var(--dsu-fs-micro);
+  line-height:var(--dsu-lh-none);
+  white-space:nowrap;
+}
+.rt-tag-passive{color:var(--dsu-sev-low-fg);background:var(--dsu-sev-low-bg);border-color:var(--dsu-sev-low-border)}
+.rt-tag-active{color:var(--dsu-sev-high-fg);background:var(--dsu-sev-high-bg);border-color:var(--dsu-sev-high-border)}
+.rt-tag-live{color:var(--dsu-success-fg);background:color-mix(in srgb,var(--dsu-success-fg) 11%,transparent);border-color:color-mix(in srgb,var(--dsu-success-fg) 32%,transparent)}
+.rt-tag-warn{color:var(--dsu-sev-critical-fg);background:var(--dsu-sev-critical-bg);border-color:var(--dsu-sev-critical-border)}
+.rt-tag-dead{color:var(--dsw-alias-label-secondary)}
+
+.rt-avail-available{color:var(--dsu-success-fg);background:color-mix(in srgb,var(--dsu-success-fg) 11%,transparent);border-color:color-mix(in srgb,var(--dsu-success-fg) 30%,transparent)}
 .rt-avail-broken{color:var(--dsu-sev-critical-fg);background:var(--dsu-sev-critical-bg);border-color:var(--dsu-sev-critical-border)}
-.rt-avail-unknown{color:var(--dsu-sev-info-fg);background:var(--dsu-sev-info-bg);border-color:var(--dsw-alias-border-l2)}
+.rt-avail-unknown{color:var(--dsu-sev-info-fg);background:var(--dsu-sev-info-bg);border-color:var(--dsu-sev-info-border)}
 
-/* ═══════════════════════════════════════════════════════════════════════
-   得分目标：大号数字 + 进度条 + 命中整行淡绿
-   ═══════════════════════════════════════════════════════════════════════ */
-.rt-score-big{font-size:25px;font-weight:620;line-height:1;letter-spacing:-.03em;
-  font-family:var(--dsu-font-mono)}
-.rt-score-cap{font-size:var(--dsu-fs-micro);letter-spacing:.07em;text-transform:uppercase;
-  color:var(--dsw-alias-label-tertiary);margin-bottom:3px}
-.rt-meter{flex:1;min-width:80px;height:5px;border-radius:3px;
-  background:color-mix(in srgb,var(--dsw-alias-label-primary) 9%,transparent);overflow:hidden}
-.rt-meter>i{display:block;height:100%;border-radius:3px;background:var(--dsw-alias-brand-primary)}
-.rt-score-group{font-size:var(--dsu-fs-tiny);font-weight:630;letter-spacing:.025em;
-  color:var(--dsw-alias-label-secondary);
-  background:color-mix(in srgb,var(--dsw-alias-label-primary) 3%,transparent)}
-.rt-score-row.hit{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 7%,transparent)}
-.rt-score-row.hit .rt-score-pts{color:var(--dsw-alias-state-success-primary)}
-.rt-score-ck{width:13px;height:13px;border-radius:3px;
-  border:1.5px solid var(--dsw-alias-border-l3);
-  display:flex;align-items:center;justify-content:center;
-  font-size:9px;line-height:1;color:transparent}
-.rt-score-row.hit .rt-score-ck{background:var(--dsw-alias-state-success-primary);
-  border-color:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-bg-base)}
-.rt-score-pts{font-family:var(--dsu-font-mono);font-size:var(--dsu-fs-tiny)}
-.rt-score-scope{font-family:var(--dsu-font-mono);font-size:9.5px;color:var(--dsw-alias-label-tertiary)}
-
-/* ═══════════════════════════════════════════════════════════════════════
-   攻击链：阶段色只染小圆点，不染整行
-   ═══════════════════════════════════════════════════════════════════════ */
-.rt-step{margin-left:8px;padding-left:12px;border-left:1.5px solid var(--dsw-alias-border-l2);position:relative}
-.rt-step:last-child{border-left-color:transparent}
-.rt-step-dot{position:absolute;left:-8px;top:7px;width:15px;height:15px;
-  border-radius:50%;display:flex;align-items:center;justify-content:center;
-  font-size:8.5px;font-weight:700;font-family:var(--dsu-font-mono);
-  color:var(--dsw-alias-bg-base);
-  box-shadow:0 0 0 2.5px var(--dsw-alias-bg-base)}
-.rt-step-title{font-size:var(--dsu-fs-body);font-weight:620;letter-spacing:-.006em}
-.rt-step-time{font-family:var(--dsu-font-mono);font-size:var(--dsu-fs-micro)}
-.rt-step-detail{font-family:var(--dsu-font-mono);font-size:var(--dsu-fs-micro);line-height:1.65;
+/* 测试状态：靠前置小圆点区分，不整块填色（一行里同时出现 3 个状态也不吵） */
+.rt-test{
+  display:inline-flex;align-items:center;gap:var(--dsu-space-1);
+  height:17px;padding:0 var(--dsu-space-1);
+  border-radius:var(--dsu-radius-xs);
+  border:1px solid var(--dsw-alias-border-l2);
   color:var(--dsw-alias-label-tertiary);
-  border-left:2px solid var(--dsw-alias-border-l2);padding:5px 0 5px 9px}
+  font-size:var(--dsu-fs-micro);
+  line-height:var(--dsu-lh-none);
+  white-space:nowrap;
+}
+.rt-test::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;flex:none}
+.rt-test-testing{color:var(--dsu-sev-high-fg);background:var(--dsu-sev-high-bg);border-color:var(--dsu-sev-high-border)}
+.rt-test-testing::before{animation:rt-dsu-pulse 1.6s ease-in-out infinite}
+.rt-test-tested{color:var(--dsu-success-fg);background:color-mix(in srgb,var(--dsu-success-fg) 11%,transparent);border-color:color-mix(in srgb,var(--dsu-success-fg) 32%,transparent)}
+.rt-test-blocked{color:var(--dsw-alias-bg-base);background:var(--dsu-sev-critical-fg);border-color:var(--dsu-sev-critical-fg)}
+.rt-test-no_surface{color:var(--dsu-sev-low-fg);background:var(--dsu-sev-low-bg);border-color:var(--dsu-sev-low-border)}
+@keyframes rt-dsu-pulse{0%,100%{opacity:1}50%{opacity:.35}}
 
 /* ═══════════════════════════════════════════════════════════════════════
-   焦点可见性：键盘 Tab 一定看得见，鼠标点击不抢戏
-   上游有几处用了 outline:none —— 这里补回 :focus-visible
+   5. 大号数字 / 表头工具条 / 提示条
+   ═══════════════════════════════════════════════════════════════════════ */
+.rt-score-big{
+  font-family:var(--dsu-font-mono);
+  font-size:25px;font-weight:var(--dsu-fw-bold);line-height:var(--dsu-lh-none);
+  letter-spacing:-.03em;
+}
+.rt-score-group{
+  font-size:var(--dsu-fs-tiny);font-weight:var(--dsu-fw-semi);letter-spacing:.025em;
+  line-height:var(--dsu-lh-tight);
+  color:var(--dsw-alias-label-secondary);
+  background:color-mix(in srgb,var(--dsw-alias-label-primary) 3%,transparent);
+}
+.rt-meter{height:5px;border-radius:3px;overflow:hidden;background:color-mix(in srgb,var(--dsw-alias-label-primary) 9%,transparent)}
+.rt-meter>i{display:block;height:100%;border-radius:3px;background:var(--dsw-alias-brand-primary)}
+.rt-toolbar{padding:var(--dsu-space-1) var(--dsu-space-3);border-bottom:var(--dsu-line)}
+.rt-foot{font-size:var(--dsu-fs-micro);color:var(--dsw-alias-label-tertiary);padding:var(--dsu-space-1) var(--dsu-space-4)}
+.rt-hint{border:1px dashed var(--dsu-sev-critical-border);background:var(--dsu-sev-critical-bg);border-radius:var(--dsu-radius-sm)}
+.rt-hint b{color:var(--dsu-sev-critical-fg);font-weight:var(--dsu-fw-semi)}
+.rt-err{color:var(--dsu-sev-critical-fg);background:var(--dsu-sev-critical-bg);border:1px solid var(--dsu-sev-critical-border);border-radius:var(--dsu-radius-sm);padding:var(--dsu-space-2) var(--dsu-space-3)}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   6. 焦点可见性
+   ─────────────────────────────────────────────────────────────────────
+   上游有几处 outline:none，键盘用户会彻底失去位置感。这里补回 :focus-visible
+   —— 只在键盘导航时出现，鼠标点击不抢戏。**不要**用 outline:none 再干掉它。
    ═══════════════════════════════════════════════════════════════════════ */
 .rt-dock :focus-visible,.rt-full :focus-visible,.rt-embedded :focus-visible,
-.dshp-dock-body :focus-visible{
+.rt-pane :focus-visible,.rt-modal-box :focus-visible{
   outline:2px solid var(--dsw-alias-brand-primary);
   outline-offset:2px;
+  border-radius:var(--dsu-radius-xs);
+}
+.rt-dock:focus-visible,.rt-full:focus-visible{outline-offset:-2px}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   7. 深色补偿
+   ─────────────────────────────────────────────────────────────────────
+   两套选择器都要覆盖：宿主既有 <html data-ds-dark-theme>，也用过
+   <body data-ds-dark-theme>。**凡是值里引用了 --dsw-alias-* 的 --dsu-*
+   都必须在这里重声明一遍**，否则会在 :root 上被浅色值冻结（只重声明
+   fg 而不重声明 bg 会得到「深色字压在浅色底上」，比不补偿更难读）。
+   ═══════════════════════════════════════════════════════════════════════ */
+[data-ds-dark-theme],
+body[data-ds-dark-theme]{
+  --dsu-line:1px solid var(--dsw-alias-border-l1);
+  --dsu-hover-bg:color-mix(in srgb,var(--dsw-alias-bg-layer-3) 60%,var(--dsw-alias-bg-layer-2));
+  --dsu-selected-bg:color-mix(in srgb,var(--dsw-alias-bg-layer-4,var(--dsw-alias-bg-layer-3)) 70%,var(--dsw-alias-bg-layer-2));
+
+  --dsu-sev-critical-fg:var(--dsw-alias-state-error-primary);
+  --dsu-sev-critical-bg:color-mix(in srgb,var(--dsw-alias-state-error-primary) 16%,transparent);
+  --dsu-sev-critical-border:color-mix(in srgb,var(--dsw-alias-state-error-primary) 42%,transparent);
+  --dsu-sev-high-fg:var(--dsw-alias-state-warn-primary);
+  --dsu-sev-high-bg:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 18%,transparent);
+  --dsu-sev-high-border:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 44%,transparent);
+  /* amber / blue 在深底上按同一色相提亮一档（600 → 400 / 500 → 300） */
+  --dsu-sev-medium-fg:var(--dsw-static-amber-400);
+  --dsu-sev-medium-bg:color-mix(in srgb,var(--dsw-static-amber-400) 16%,transparent);
+  --dsu-sev-medium-border:color-mix(in srgb,var(--dsw-static-amber-400) 36%,transparent);
+  --dsu-sev-low-fg:var(--dsw-static-blue-300);
+  --dsu-sev-low-bg:color-mix(in srgb,var(--dsw-static-blue-300) 15%,transparent);
+  --dsu-sev-low-border:color-mix(in srgb,var(--dsw-static-blue-300) 34%,transparent);
+  --dsu-sev-info-fg:var(--dsw-alias-label-tertiary);
+  --dsu-sev-info-bg:color-mix(in srgb,var(--dsw-alias-label-tertiary) 14%,transparent);
+  --dsu-sev-info-border:var(--dsw-alias-border-l3);
+
+  /* 深色下同一个表达式自动变成"提亮"（label-primary 在深色是近白），
+     约 7.9:1。因为引用 alias，必须在这里重声明，否则被 :root 的浅色值冻结。 */
+  --dsu-success-fg:color-mix(in srgb,var(--dsw-alias-state-success-primary) 62%,var(--dsw-alias-label-primary));
 }
 
-/* 提示条 / 错误：语义化，别再用写死的 #ef4444 */
-.rt-hint{border:1px dashed var(--dsu-sev-critical-border);background:var(--dsu-sev-critical-bg)}
-.rt-hint b{color:var(--dsu-sev-critical-fg)}
-.rt-err{color:var(--dsu-sev-critical-fg);background:var(--dsu-sev-critical-bg);
-  border:1px solid var(--dsu-sev-critical-border);border-radius:var(--dsu-radius-sm);
-  padding:6px 10px}
+/* 深色下把「更亮一层」的语义反过来用：阴影没用了，靠底色阶与细线分层 */
+[data-ds-dark-theme] .rt-row:hover,
+[data-ds-dark-theme] .rt-vrow:hover,
+[data-ds-dark-theme] .rt-score-row:hover,
+body[data-ds-dark-theme] .rt-row:hover,
+body[data-ds-dark-theme] .rt-vrow:hover,
+body[data-ds-dark-theme] .rt-score-row:hover{
+  background:var(--dsu-hover-bg);
+}
+[data-ds-dark-theme] .rt-row.head,
+[data-ds-dark-theme] .rt-vrow.head,
+[data-ds-dark-theme] .rt-score-row.head,
+body[data-ds-dark-theme] .rt-row.head,
+body[data-ds-dark-theme] .rt-vrow.head,
+body[data-ds-dark-theme] .rt-score-row.head{
+  border-bottom-color:var(--dsw-alias-border-l2);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   页签条单行收紧 + 等宽数字
+   ═══════════════════════════════════════════════════════════════════════ */
+/* 10 个页签在 620px 宽下必须排成一排：默认 padding 会把最后一个挤到第二排，
+   既浪费纵向空间，看着也像渲染错位。内边距收到 7px 正好放下；
+   保留 wrap 作保险 —— 更窄时换行总比横向滚动把页签藏起来好。 */
+.rt-tabs{gap:1px;padding:0 var(--dsu-space-3)}
+.rt-tab{flex:none;padding:9px 7px 8px}
+
+/* 数字列一律等宽对齐（端口 / 分值 / 计数 / 时间戳 / IP）。
+   拆成逐条类规则：测试能按类名逐个断言覆盖，也便于以后单独调某一类。 */
+.rt-mono{font-family:var(--dsu-font-mono);font-variant-numeric:tabular-nums}
+.rt-ip{font-family:var(--dsu-font-mono);font-variant-numeric:tabular-nums}
+.rt-row{font-variant-numeric:tabular-nums}
+.rt-vrow{font-variant-numeric:tabular-nums}
+.rt-score-row{font-variant-numeric:tabular-nums}
+.rt-score-pts{font-family:var(--dsu-font-mono);font-variant-numeric:tabular-nums}
+.rt-score-big{font-family:var(--dsu-font-mono);font-variant-numeric:tabular-nums}
+.rt-tag{font-variant-numeric:tabular-nums}
+.rt-sev{font-variant-numeric:tabular-nums}
+.rt-sev-critical{font-variant-numeric:tabular-nums}
+.rt-sev-high{font-variant-numeric:tabular-nums}
+.rt-sev-medium{font-variant-numeric:tabular-nums}
+.rt-sev-low{font-variant-numeric:tabular-nums}
+.rt-sev-info{font-variant-numeric:tabular-nums}
+.rt-avail{font-variant-numeric:tabular-nums}
+.rt-step-time{font-family:var(--dsu-font-mono);font-variant-numeric:tabular-nums}
+.rt-foot{font-family:var(--dsu-font-mono);font-variant-numeric:tabular-nums}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   表格列宽：上游按「全宽窗口」设计的固定像素列，在 620px dock 里会把
+   最后一列压成竖排单字（实测：「开放端口 / 指纹」逐字换行，列宽被算成 0）。
+
+   做法分两步：
+   ① 给滚动容器声明 container-type，让下面的容器查询真的能命中
+      （不声明的话 @container 永不匹配，这是第一次修没生效的原因）；
+   ② 窄容器下**少显示一列**而不是硬压五列 —— 401px 内容宽里塞 5 列，
+      无论怎么分配都不够读。
+   ═══════════════════════════════════════════════════════════════════════ */
+.rt-table,.rt-pane,.rt-chain,.rt-list{container-type:inline-size}
+
+/* 宽容器（full 窗口 / 大屏）：五列全显示 */
+.rt-row{grid-template-columns:minmax(120px,150px) 50px 84px minmax(120px,1.3fr) minmax(110px,1fr)}
+.rt-vrow{grid-template-columns:62px minmax(0,1.8fr) minmax(120px,180px) 110px 74px 54px}
+.rt-score-row{grid-template-columns:14px minmax(0,1fr) 76px 64px}
+
+/* 窄容器（dock 常态）：按真实列序精确减列。
+   资产表 5 列：①IP ②易打 ③测试状态 ④端口服务 ⑤指纹
+   漏洞表 6 列：①等级 ②漏洞 ③目标 ④拿到什么 ⑤状态 ⑥置信
+   被砍的列在详情面板里都还能看到，不是信息丢失。 */
+@container (max-width: 560px){
+  /* 资产：砍第 5 列（指纹） */
+  .rt-row{grid-template-columns:minmax(108px,1.1fr) 46px 78px minmax(96px,1.2fr)}
+  .rt-row > *:nth-child(5){display:none}
+  /* 漏洞：砍第 6 列（置信） */
+  .rt-vrow{grid-template-columns:58px minmax(0,1.6fr) minmax(84px,1fr) 96px 56px}
+  .rt-vrow > *:nth-child(6){display:none}
+  .rt-score-row{grid-template-columns:14px minmax(0,1fr) 70px 56px}
+}
+/* 极窄（拖到最小宽 320px）：再砍到 3 列 */
+@container (max-width: 420px){
+  /* 资产：①IP ②易打 ③测试状态 —— 砍 ④⑤ */
+  .rt-row{grid-template-columns:minmax(100px,1fr) 44px 76px}
+  .rt-row > *:nth-child(4){display:none}
+  .rt-row > *:nth-child(5){display:none}
+  /* 漏洞：①等级 ②漏洞 ③目标 —— 砍 ④⑤⑥ */
+  .rt-vrow{grid-template-columns:54px minmax(0,1fr) minmax(76px,.8fr)}
+  .rt-vrow > *:nth-child(4){display:none}
+  .rt-vrow > *:nth-child(5){display:none}
+  .rt-vrow > *:nth-child(6){display:none}
+  /* 得分：①勾选 ②名称 ③分值 —— 砍 ④口径 */
+  .rt-score-row{grid-template-columns:14px minmax(0,1fr) 64px}
+  .rt-score-row > *:nth-child(4){display:none}
+}
+
+/* full 模式（独立窗口）：最宽松 */
+.rt-full .rt-row{grid-template-columns:180px 56px 96px minmax(0,1.3fr) minmax(150px,1fr)}
+.rt-full .rt-vrow{grid-template-columns:76px minmax(0,1.8fr) minmax(160px,240px) 130px 84px 60px}
+
+/* 单元格一律允许收缩、不竖排：
+   word-break: break-all 会把 443/tcp 断成 4 4 3，逐字换行 */
+.rt-row > *,.rt-vrow > *,.rt-score-row > *{
+  min-width:0;
+  overflow-wrap:normal;
+  word-break:keep-all;
+}
+
+/* 尊重系统「减少动态效果」：不做过渡与脉冲，信息一个不少 */
+@media (prefers-reduced-motion:reduce){
+  .rt-test-testing::before{animation:none}
+  .rt-row,.rt-vrow,.rt-score-row,.rt-btn,.rt-item,.rt-seg,.rt-tab{transition:none}
+}
 `;
 
-/** 注入用的最小 `document` 面（见 `dom.ts` 的 `MinimalDocument`）。 */
-export interface StylesDocument {
+/**
+ * `<style>` 元素的最小面 —— 直接复用 `dom.ts` 的 `MinimalStyleElement`。
+ *
+ * 不新造形状：注入器写进去的东西，与仓库其它 DOM 代码是同一个契约。
+ */
+export type StyleElementLike = MinimalStyleElement;
+
+/**
+ * 注入用的最小 `document` 面。
+ *
+ * 为什么自定义而不用 `MinimalDocument`：后者**没有 `querySelector`**，
+ * 而幂等（「已有节点就复用」）必须能查到既有节点。`dom.ts` 的
+ * `MinimalDocument` 是按「只声明我们真读的成员」长的，那里确实不需要查询；
+ * 这里需要，所以单独声明一个更宽一点的窄接口 —— 比给全局 `MinimalDocument`
+ * 加成员（那会逼所有调用点都实现它）影响面小得多。
+ *
+ * `querySelector` 仍是可选的：拿不到它时退化为「按实例记忆」的幂等
+ * （见 `installStyles`），而不是抛错 —— 注入样式是**尽力而为**的事，
+ * 不该因为宿主文档对象不完整就让整个面板挂掉。
+ */
+export interface DocumentLike {
+  createElement(tag: "style"): StyleElementLike;
   readonly head: {
-    append(node: unknown): void;
-    appendChild(node: unknown): unknown;
-  };
-  createElement(tag: "style"): {
-    textContent: string | null;
-    setAttribute(name: string, value: string): void;
-    remove?(): void;
+    append(child: StyleElementLike): void;
   };
   querySelector?(selector: string): unknown;
 }
 
-/** 默认注入标记属性名。 */
+/** 标记属性名：注入的每个 `<style>` 都带它，便于查重与人工定位。 */
 export const STYLE_ATTR = "data-dsh-unbound-drill";
+
+/** `key` 的默认值 —— 与标记属性的名字一致，方便在 DevTools 里直接搜。 */
+export const DEFAULT_STYLE_KEY = STYLE_ATTR;
 
 /** `installStyles` 的选项。 */
 export interface InstallStylesOptions {
-  /** 去重用的属性名（默认 `data-dsh-unbound-drill`）。 */
-  readonly attr?: string | undefined;
-  /** 去重用的属性值（默认 `"1"`）。 */
-  readonly value?: string | undefined;
+  /**
+   * 标记属性的**值**，默认 `"data-dsh-unbound-drill"`。
+   *
+   * 同一个 `key` = 同一个实例（重复调用复用同一节点）；
+   * 不同 `key` = 各自独立的节点（同一页面挂两个控制台时，清理互不牵连）。
+   */
+  readonly key?: string | undefined;
+}
+
+/**
+ * 按 `document` 记住「本实例装过哪些 key 的节点」。
+ *
+ * 两个用途：`querySelector` 缺失时仍能保证幂等；清理函数能拿到自己那个节点
+ * （而不是误删别人后插进来的同 key 节点）。用 `WeakMap` 是为了不把文档对象
+ * 钉在内存里 —— 文档销毁即整条记录消失。
+ */
+const INSTALLED = new WeakMap<DocumentLike, Map<string, StyleElementLike>>();
+
+/** 取（或建）某个文档的 key→node 记忆表。 */
+function slotOf(doc: DocumentLike): Map<string, StyleElementLike> {
+  const existing = INSTALLED.get(doc);
+  if (existing !== undefined) return existing;
+  const created = new Map<string, StyleElementLike>();
+  INSTALLED.set(doc, created);
+  return created;
+}
+
+/**
+ * 在文档里查同 key 的既有 `<style>`。
+ *
+ * 两条路：优先 `doc.querySelector`（真实 DOM 走这条，跨实例都查得到）；
+ * 退路是模块级记忆表（假文档 / 精简文档对象走这条）。查不到返回 `undefined`。
+ */
+function findInstalled(doc: DocumentLike, key: string): StyleElementLike | undefined {
+  const remembered = INSTALLED.get(doc)?.get(key);
+  if (remembered !== undefined) return remembered;
+  if (typeof doc.querySelector !== "function") return undefined;
+  const found = doc.querySelector("style[" + STYLE_ATTR + '="' + key + '"]');
+  if (found !== null && typeof found === "object") return found as StyleElementLike;
+  return undefined;
 }
 
 /**
@@ -917,50 +1168,45 @@ export interface InstallStylesOptions {
  *
  * ## 为什么合成一个 `<style>` 而不是两个
  *
- * 两者的层叠顺序是**语义上的依赖**（THEME 必须赢 CSS），写进同一个
- * `<style>` 里，顺序由字符串拼接位置保证，不依赖「两次 append 的先后」
- * —— 后者在样式重算上是成立的，但如果将来有人在中间插了别的注入，
- * 顺序就会变得脆弱。合成一个节点后，去重也只需一次查询。
+ * `THEME` 必须**排在** `CSS` 之后才能赢 —— 这是语义上的顺序依赖，不是巧合。
+ * 合成一个节点后，顺序由字符串拼接位置保证：它是一份文本内部的先后，
+ * 不依赖「两次 append 的时间先后」。后者在浏览器里也成立，但是脆的：
+ * 将来任何人在中间插一次别的注入、或宿主把两个节点挪进不同层叠上下文，
+ * 顺序就悄悄反了 —— 而「顺序反了」的症状是「主题没生效」，极难归因。
+ *
+ * 附带好处：查重只查一个节点，清理只移除一个节点。
  *
  * ## 幂等
  *
- * 已有同 attr+value 的节点时**复用**，不重复插入：宿主的 hot reload 会
- * 反复调 `apply()`，每轮插一个 `<style>` 会让样式表无限增长。
- * 复用而不是提前返回，是因为复用能顺手刷新内容（改完 THEME 立刻生效）。
+ * 已有同 `key` 的节点时**复用并刷新内容**，不重复插入。宿主 hot reload 会
+ * 反复调注入，每轮插一个 `<style>` 会让样式表无限增长（旧规则还在生效，
+ * 改一版留一层，调样式时永远看到最旧的）。复用而不是提前返回，是为了
+ * 「改完立刻生效」：刷新 `textContent` 就够，浏览器会重新解析。
+ *
+ * ## 清理函数
+ *
+ * 移除节点，并把记忆表里的记录清掉。**可重复调用**（第二次是 no-op）：
+ * React 的 effect 清理在热重载下会跑不止一次，清理函数抛错会把整棵面板带崩。
  */
-export function installStyles(
-  doc: StylesDocument,
-  options: InstallStylesOptions = {},
-): () => void {
-  const attr = options.attr ?? STYLE_ATTR;
-  const value = options.value ?? "1";
+export function installStyles(doc: DocumentLike, options: InstallStylesOptions = {}): () => void {
+  const key = options.key ?? DEFAULT_STYLE_KEY;
   const payload = CSS + "\n\n" + THEME;
 
-  const selector = "style[" + attr + '="' + value + '"]';
-  const existing = doc.querySelector?.(selector) as
-    | { textContent: string | null; remove?(): void }
-    | null
-    | undefined;
-
-  if (existing !== null && existing !== undefined) {
-    existing.textContent = payload;
-    let removed = false;
-    return () => {
-      if (removed) return;
-      removed = true;
-      existing.remove?.();
-    };
+  const existing = findInstalled(doc, key);
+  const node = existing ?? doc.createElement("style");
+  if (existing === undefined) {
+    node.setAttribute(STYLE_ATTR, key);
+    doc.head.append(node);
   }
-
-  const node = doc.createElement("style");
-  node.setAttribute(attr, value);
   node.textContent = payload;
-  doc.head.append(node);
+  slotOf(doc).set(key, node);
 
-  let removed = false;
+  let disposed = false;
   return () => {
-    if (removed) return;
-    removed = true;
-    node.remove?.();
+    if (disposed) return;
+    disposed = true;
+    const table = INSTALLED.get(doc);
+    if (table !== undefined && table.get(key) === node) table.delete(key);
+    node.remove();
   };
 }
