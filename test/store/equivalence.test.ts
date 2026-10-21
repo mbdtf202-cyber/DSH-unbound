@@ -24,7 +24,7 @@ import { after, describe, it } from "node:test";
 import { createRequire } from "node:module";
 
 import { RedteamStore } from "../../src/redteam/store/index.js";
-import { skipReason, upstreamFile } from "../helpers/upstream.js";
+import { shouldSkip, skipReason, upstreamFile } from "../helpers/upstream.js";
 import { makeTempStore, sampleBundle } from "./fixtures.js";
 
 /**
@@ -225,7 +225,7 @@ function seedBoth(pair: Pair): void {
 }
 
 describe("equivalence: 建库与采集入库", () => {
-  it("importBundle 的 counts 与 stats 完全一致", async () => {
+  it("importBundle 的 counts 与 stats 完全一致", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     const up = pair.upstream.importBundle(pair.upstreamId, sampleBundle());
     const my = pair.mine.importBundle(pair.mineId, sampleBundle());
@@ -233,13 +233,13 @@ describe("equivalence: 建库与采集入库", () => {
     assertSame("stats", pair.upstream.stats(pair.upstreamId), pair.mine.stats(pair.mineId), pair.mine.root);
   });
 
-  it("listSegments 一致（含各 C 段的计数与 scope）", async () => {
+  it("listSegments 一致（含各 C 段的计数与 scope）", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     seedBoth(pair);
     assertSame("listSegments", pair.upstream.listSegments(pair.upstreamId), pair.mine.listSegments(pair.mineId), pair.mine.root);
   });
 
-  it("consoleDigest 的 sections 计数一致（at 时间戳归一化）", async () => {
+  it("consoleDigest 的 sections 计数一致（at 时间戳归一化）", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     seedBoth(pair);
     const up = pair.upstream.consoleDigest(pair.upstreamId);
@@ -268,7 +268,7 @@ describe("equivalence: 资产查询（排序 / 筛选 / 分页）", () => {
     }
   }
 
-  it("全部 4 种 sort 的输出顺序一致", async () => {
+  it("全部 4 种 sort 的输出顺序一致", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     seedAssets(pair);
     for (const sort of ["priority", "todo", "ports", "discovered"]) {
@@ -279,7 +279,7 @@ describe("equivalence: 资产查询（排序 / 筛选 / 分页）", () => {
     }
   });
 
-  it("各种筛选的 total 与结果顺序一致", async () => {
+  it("各种筛选的 total 与结果顺序一致", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     seedAssets(pair);
     const filters: Record<string, unknown>[] = [
@@ -311,7 +311,7 @@ describe("equivalence: 资产查询（排序 / 筛选 / 分页）", () => {
     }
   });
 
-  it("单资产详情的全部字段一致（含 ports / fingerprints / names / 派生计数）", async () => {
+  it("单资产详情的全部字段一致（含 ports / fingerprints / names / 派生计数）", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     seedBoth(pair);
     const upList = pair.upstream.listAssets(pair.upstreamId, {}) as { items: { id: number }[] };
@@ -329,7 +329,7 @@ describe("equivalence: 资产查询（排序 / 筛选 / 分页）", () => {
     }
   });
 
-  it("⚠️ getAsset 的 observations 顺序：上游**不保证**（同毫秒内插入会并列）", async () => {
+  it("⚠️ getAsset 的 observations 顺序：上游**不保证**（同毫秒内插入会并列）", { skip: shouldSkip() }, async () => {
     /* 这条不是"新实现与上游不一致"，而是记录一个**上游既有的不确定性**。
      *
      * `getAsset` 的观测查询是 `ORDER BY collected_at DESC LIMIT 200` ——
@@ -353,7 +353,7 @@ describe("equivalence: 资产查询（排序 / 筛选 / 分页）", () => {
     assert.deepEqual(myKeys, upKeys, "观测的**集合**必须一致（顺序不比）");
   });
 
-  it("listWeb / domainIndex 一致", async () => {
+  it("listWeb / domainIndex 一致", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     seedBoth(pair);
     assertSame("listWeb", pair.upstream.listWeb(pair.upstreamId, {}), pair.mine.listWeb(pair.mineId, {}), pair.mine.root);
@@ -382,7 +382,7 @@ describe("equivalence: 计分（最需要锁住的一块）", () => {
     }
   }
 
-  it("listScorePoints 的 items / ruleGroups / summary 逐字段一致", async () => {
+  it("listScorePoints 的 items / ruleGroups / summary 逐字段一致", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     seedHits(pair);
     const up = pair.upstream.listScorePoints(pair.upstreamId);
@@ -399,7 +399,7 @@ describe("equivalence: 计分（最需要锁住的一块）", () => {
     assertSame("ruleGroups", up.ruleGroups, my.ruleGroups, pair.mine.root);
   });
 
-  it("⚠️ summary.serviceCappedHits 与 **capped 命中的顺序** 一致", async () => {
+  it("⚠️ summary.serviceCappedHits 与 **capped 命中的顺序** 一致", { skip: shouldSkip() }, async () => {
     /* 这一条锁住 Lead 要求的"看起来像 bug 但实际正确"那段代码：
        上游用 `cappedAll.items.filter(h => ... enabledIds.has(h.point_id))` 过滤 hit 行，
        我改成先建 `hit.id → point_id` 映射再过滤。
@@ -419,7 +419,7 @@ describe("equivalence: 计分（最需要锁住的一块）", () => {
     assert.ok(upCappedIds.length > 0, "这个用例必须真的产生封顶，否则等于没测");
   });
 
-  it("addScoreHit 的返回一致（含 warning / demoted_hits）", async () => {
+  it("addScoreHit 的返回一致（含 warning / demoted_hits）", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     const first = { code: "server-host", target: "10.0.0.5:22", evidence: "root", points: 50 };
     const a = pair.upstream.addScoreHit(pair.upstreamId, first);
@@ -433,7 +433,7 @@ describe("equivalence: 计分（最需要锁住的一块）", () => {
     assertSame("addScoreHit 被封顶时（除 summary）", { ...c, summary: undefined }, { ...d, summary: undefined }, pair.mine.root);
   });
 
-  it("scoreChain 的 items / summary 一致", async () => {
+  it("scoreChain 的 items / summary 一致", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     seedHits(pair);
     const up = pair.upstream.scoreChain(pair.upstreamId);
@@ -455,7 +455,7 @@ describe("equivalence: 计分（最需要锁住的一块）", () => {
 });
 
 describe("equivalence: 漏洞 / 凭据 / 会话（落库语义）", () => {
-  it("addVuln 的幂等键与返回值一致", async () => {
+  it("addVuln 的幂等键与返回值一致", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     const inputs: Record<string, unknown>[] = [
       { title: "Shiro RCE", cve: "CVE-2016-4437", severity: "critical", target: "http://10.0.0.5:8080/" },
@@ -481,7 +481,7 @@ describe("equivalence: 漏洞 / 凭据 / 会话（落库语义）", () => {
     assertSame("vulnStats", pair.upstream.vulnStats(pair.upstreamId), pair.mine.vulnStats(pair.mineId), pair.mine.root);
   });
 
-  it("凭据的 COALESCE 合并语义一致（不给新值不覆盖旧值）", async () => {
+  it("凭据的 COALESCE 合并语义一致（不给新值不覆盖旧值）", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     const inputs: Record<string, unknown>[] = [
       { host: "10.0.0.5", username: "root", secret_type: "password", secret_value: "first", privilege: "admin", tool: "hydra" },
@@ -496,7 +496,7 @@ describe("equivalence: 漏洞 / 凭据 / 会话（落库语义）", () => {
     assertSame("listCredentials", pair.upstream.listCredentials(pair.upstreamId, {}), pair.mine.listCredentials(pair.mineId, {}), pair.mine.root);
   });
 
-  it("WebShell 的新增/更新分支与规范化一致", async () => {
+  it("WebShell 的新增/更新分支与规范化一致", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     const inputs: Record<string, unknown>[] = [
       { url: "http://10.0.0.5/shell.jsp", shell_type: "冰蝎", pass_key: "k1", privilege: "root" },
@@ -513,7 +513,7 @@ describe("equivalence: 漏洞 / 凭据 / 会话（落库语义）", () => {
     assertSame("listWebshells", pair.upstream.listWebshells(pair.upstreamId, {}), pair.mine.listWebshells(pair.mineId, {}), pair.mine.root);
   });
 
-  it("隧道的 legit 判定与 warning 文案一致", async () => {
+  it("隧道的 legit 判定与 warning 文案一致", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     const inputs: Record<string, unknown>[] = [
       { kind: "suo5", listen: "127.0.0.1:1080", entry_kind: "target-http" },
@@ -534,7 +534,7 @@ describe("equivalence: 漏洞 / 凭据 / 会话（落库语义）", () => {
       pair.mine.root);
   });
 
-  it("攻击步骤的 stage 映射 / 告警 / 记分回挂一致", async () => {
+  it("攻击步骤的 stage 映射 / 告警 / 记分回挂一致", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     const steps: Record<string, unknown>[] = [
       { title: "扫描", stage: "recon" },
@@ -582,7 +582,7 @@ describe("equivalence: 报告（markdown 全文比对）", () => {
     pair.mine.addHttpEvidence(pair.mineId, { vuln_id: 1, url: "http://10.0.0.5:8080/", method: "GET", request: "GET / HTTP/1.1\r\nHost: 10.0.0.5:8080\r\n\r\n" });
   }
 
-  it("report() 的 markdown 与 stats 一致", async () => {
+  it("report() 的 markdown 与 stats 一致", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     seedReportable(pair);
     const up = pair.upstream.report(pair.upstreamId);
@@ -591,7 +591,7 @@ describe("equivalence: 报告（markdown 全文比对）", () => {
     assertSame("report.markdown（生成时间归一化后）", up["markdown"], my.markdown, pair.mine.root);
   });
 
-  it("reportTargets() 一致", async () => {
+  it("reportTargets() 一致", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     seedReportable(pair);
     const up = pair.upstream.reportTargets(pair.upstreamId);
@@ -605,7 +605,7 @@ describe("equivalence: 报告（markdown 全文比对）", () => {
     );
   });
 
-  it("scoreReport() 的 items/summary 与 markdown 一致", async () => {
+  it("scoreReport() 的 items/summary 与 markdown 一致", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     seedBoth(pair);
     const hits: Record<string, unknown>[] = [
@@ -630,7 +630,7 @@ describe("equivalence: 报告（markdown 全文比对）", () => {
 });
 
 describe("equivalence: 知识库", () => {
-  it("savePoc / searchPocs / pocStats 一致", async () => {
+  it("savePoc / searchPocs / pocStats 一致", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     const pocs: Record<string, unknown>[] = [
       { title: "Shiro 反序列化", cve: "CVE-2016-4437", kind: "poc", content: "poc body", language: "python", source: "self", verified: true, category: "deserialization" },
@@ -654,7 +654,7 @@ describe("equivalence: 知识库", () => {
 });
 
 describe("equivalence: 图谱与时间线", () => {
-  it("graph / attackGraph / discoveryTimeline 一致", async () => {
+  it("graph / attackGraph / discoveryTimeline 一致", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     seedBoth(pair);
     assertSame("graph", pair.upstream.graph(pair.upstreamId, {}), pair.mine.graph(pair.mineId, {}), pair.mine.root);
@@ -665,7 +665,7 @@ describe("equivalence: 图谱与时间线", () => {
       pair.mine.root);
   });
 
-  it("listStages / listPrompts 的角色清单一致", async () => {
+  it("listStages / listPrompts 的角色清单一致", { skip: shouldSkip() }, async () => {
     const pair = await makePair();
     const upStages = pair.upstream.listStages(pair.upstreamId) as { code: string }[];
     const myStages = pair.mine.listStages(pair.mineId);
