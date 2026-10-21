@@ -110,6 +110,68 @@ export function isBareIdentityNeedle(pattern: PatchPattern): boolean {
   return /^You are a coding agent powered by\b/.test(needle);
 }
 
+/**
+ * 一条补丁是否**自己**写出了它声明的标记。
+ *
+ * 判据：标记字符串出现在本补丁某条 replacement 的**产出**里。
+ *
+ * 为什么需要它：纯删除型补丁（真实案例 #73，替换值只是 `"\n"`）永远不会写标记，
+ * 它声明的标记一定是从别的补丁那里借来的。对这类补丁，标记无法证明「我做过」。
+ * 而正常补丁（含自引用升级链）的替换值里带着自己的标记，这条判据为真。
+ */
+export function patchOwnsItsMarkers(patch: PatchDefinition): boolean {
+  const markers = [...(patch.markers ?? []), ...(patch.marker === undefined ? [] : [patch.marker])];
+  if (markers.length === 0) return false;
+  const outputs = patch.replacements.map((r) => toLf(r.replace)).join("\n");
+  return markers.some((m) => outputs.includes(toLf(m)));
+}
+
+/**
+ * 找出补丁集合里「被多条补丁争用」的标记。
+ *
+ * 为什么必须在**集合层面**算，而不是在单条补丁里判断：一条补丁单独看是自洽的
+ * （测试里造的单补丁也应当照常工作）。只有当**另一条**补丁也产出同一条标记、
+ * 且两条补丁的目标文件有重叠时，这条标记才不再能证明「是哪一条打的」。
+ *
+ * 只在**集合层面**降级：单条补丁（测试里造的、或真正独占总标记的）行为完全不变。
+ *
+ * 与 `patchOwnsItsMarkers` 配合使用，两者同时成立才不采信标记：
+ *   - owned=false  ：这个标记本来就不是我写的（#73 借 #70 的）
+ *   - contended=true：还有别人也写同一标记、还打同一批文件
+ * 只满足其中一条时保持原行为，避免误伤（#70 自己拥有标记，只是被别人共用）。
+ */
+export function contendedMarkers(patches: readonly PatchDefinition[], targetFilesOf: (p: PatchDefinition) => readonly string[]): ReadonlySet<string> {
+  /** marker -> 声明它的补丁下标 */
+  const owners = new Map<string, number[]>();
+  for (const [i, p] of patches.entries()) {
+    const ms = [...(p.markers ?? []), ...(p.marker === undefined ? [] : [p.marker])];
+    for (const m of new Set(ms.map((x) => toLf(x)))) {
+      const list = owners.get(m);
+      if (list === undefined) owners.set(m, [i]);
+      else list.push(i);
+    }
+  }
+
+  const contended = new Set<string>();
+  for (const [marker, idxs] of owners) {
+    if (idxs.length < 2) continue;
+    // 只有当其中两条补丁的目标文件有交集时，标记才真的分不清归属。
+    outer: for (let a = 0; a < idxs.length; a += 1) {
+      for (let b = a + 1; b < idxs.length; b += 1) {
+        const ia = idxs[a]!;
+        const ib = idxs[b]!;
+        const fa = new Set(targetFilesOf(patches[ia]!));
+        const overlap = targetFilesOf(patches[ib]!).some((f) => fa.has(f));
+        if (overlap) {
+          contended.add(marker);
+          break outer;
+        }
+      }
+    }
+  }
+  return contended;
+}
+
 /** 补丁是否已经处于「已应用」形态。 */
 export function isPatchApplied(text: string, patch: PatchDefinition): boolean {
   const hay = toLf(text);
@@ -145,10 +207,20 @@ export interface ApplyTextResult {
  * 把补丁应用到一段文本。
  *
  * 注意 `fp` 只影响「是否按 YAML 规则处理」，不读写文件。
+ *
+ * `opts.respectSkipIfMarked`（默认 true）控制内置的防膨胀短路。
+ * 批处理路径（`applyOne`）在调用前已经用**标记争用**判定过一遍，
+ * 它传 false 关掉这里的内置幂等短路 —— 否则争用判定会被这里无条件推翻
+ * （真实案例 #73：`applyOne` 已判定标记不可信，却在这里又被判 already）。
  */
-export function applyPatchToText(text: string, patch: PatchDefinition, fp: string): ApplyTextResult {
+export function applyPatchToText(
+  text: string,
+  patch: PatchDefinition,
+  fp: string,
+  opts: { readonly respectSkipIfMarked?: boolean } = {},
+): ApplyTextResult {
   // skipIfMarked：已经带标记就整条跳过，防止重复插入导致的无限膨胀。
-  if (patch.skipIfMarked && isPatchApplied(text, patch)) {
+  if (opts.respectSkipIfMarked !== false && patch.skipIfMarked && isPatchApplied(text, patch)) {
     return { text, changed: false, appliedCount: 0, notFoundCount: 0 };
   }
 

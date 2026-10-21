@@ -51,7 +51,17 @@ export type OriginDecision =
         /** Origin 在严格路径下无法解析成 URL。 */
         | "unparsable-origin"
         /** Origin 可解析，但 host 与 Host 不同。 */
-        | "host-mismatch";
+        | "host-mismatch"
+        /**
+         * 回环 socket 上出现了外部 Origin。
+         *
+         * 宿主 HTTP 服务只监听 `127.0.0.1`，所以**所有**请求的 remoteAddress
+         * 都是回环 —— 包括用户浏览器里恶意页面发起的跨源 fetch。旧的
+         * 「回环无条件放行」因此把它一起放过了。这一条专门指那种情况，
+         * 与 `host-mismatch`（非回环 + Origin 与 Host 不符）区分开，
+         * 便于日志里一眼看出是哪种攻击面。
+         */
+        | "cross-origin";
     };
 
 /** 只需要我们读的那几个字段，便于测试直接构造，不必造完整 IncomingMessage。 */
@@ -117,9 +127,39 @@ export function originHostOf(origin: string): string | null {
 export function checkOrigin(facts: RequestOriginFacts): OriginDecision {
   const { remoteAddress, host, origin } = facts;
 
-  // ① 回环 socket：本机进程，无条件放行（不看 Origin —— 内嵌 webview 可能不带）。
+  // ① 回环 socket：**本机进程**放行，但不再「无条件」。
+  //
+  // ## 为什么推翻旧行为
+  //
+  // 旧实现是 `if (isLoopbackAddress(remoteAddress)) return allow`，依据是
+  // "浏览器对跨源 fetch 必定加 Origin，缺失只可能来自本机"。这个前提**只对了
+  // 一半**：缺失 Origin 确实只来自本机，但**带了 Origin 的请求也可能来自本机
+  // socket** —— 因为宿主的 HTTP 服务只监听 `127.0.0.1`，于是**所有**请求的
+  // `remoteAddress` 都是 `127.0.0.1`，包括用户浏览器里任意恶意页面发起的
+  // 跨源 fetch。
+  //
+  // 实测后果（修复前）：`fetch('http://127.0.0.1:PORT/redteam/api',
+  // {method:'POST', body:'{"op":"addCredential",...}'})` 从 `https://evil.example`
+  // 发起会返回 200 并真的写库。同源策略只阻止**读**响应，不阻止**发**请求。
+  //
+  // ## 现在的判据
+  //
+  // 回环 socket 上按 Origin 三态判：
+  //   · 缺失 / 空串 / "null"  → 放行（真正的本机进程：CLI、内嵌 webview、file:）
+  //   · 可解析且 host 是本机   → 放行（本机页面，含 app:// 外壳）
+  //   · 其他（含任何外部 host）→ **拒绝**
+  //
+  // 这保留了旧行为想保的全部场景（桌面 webview 不带 Origin、file: 的空 host），
+  // 只切掉了「外部页面冒充本机」这一条。
   if (isLoopbackAddress(remoteAddress)) {
-    return { allow: true, reason: "loopback" };
+    if (origin === null || origin === "" || origin === "null") {
+      return { allow: true, reason: "loopback" };
+    }
+    const loopbackOriginHost = originHostOf(origin);
+    if (loopbackOriginHost !== null && (loopbackOriginHost === "" || isLocalHost(loopbackOriginHost))) {
+      return { allow: true, reason: "loopback" };
+    }
+    return { allow: false, reason: "cross-origin" };
   }
 
   // ② 本机 Host：桌面外壳的三种 Origin 形态各自放行。

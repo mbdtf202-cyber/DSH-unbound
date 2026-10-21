@@ -104,12 +104,52 @@ describe("originHostOf", () => {
 });
 
 describe("checkOrigin — 放行分支（6 个）", () => {
-  it("① 回环 socket 无条件放行，即使是外部 Origin", () => {
-    // 本机进程（含内嵌 webview）可能不带 Origin，也可能带任意 Origin。
-    // 放宽的依据：浏览器对跨源 fetch 必定加 Origin，缺失只可能来自本机。
+  it("① 回环 socket + 缺失 Origin 放行（真正的本机进程）", () => {
+    // 本机进程（CLI、内嵌 webview）可能根本不带 Origin。
     assertAllow(
-      checkOrigin({ remoteAddress: "127.0.0.1", host: "127.0.0.1:3000", origin: "https://evil.example" }),
+      checkOrigin({ remoteAddress: "127.0.0.1", host: "127.0.0.1:3000", origin: null }),
       "loopback",
+    );
+  });
+
+  it("① 回环 socket + 本机 Origin 放行（本机页面）", () => {
+    assertAllow(
+      checkOrigin({ remoteAddress: "127.0.0.1", host: "127.0.0.1:3000", origin: "http://127.0.0.1:3000" }),
+      "loopback",
+    );
+    assertAllow(
+      checkOrigin({ remoteAddress: "::1", host: "localhost:3000", origin: "http://localhost:43120" }),
+      "loopback",
+    );
+  });
+
+  it("🔒 回环 socket + 外部 Origin **必须拒绝**（CSRF 回归）", () => {
+    /* 这条是安全回归测试。
+     *
+     * 宿主 HTTP 服务只监听 `127.0.0.1`，所以**所有**请求的 remoteAddress 都是
+     * 回环 —— 包括用户浏览器里恶意页面发起的跨源 fetch。旧实现在这里无条件
+     * `return allow`，于是：
+     *
+     *   fetch('http://127.0.0.1:PORT/redteam/api',
+     *         { method: 'POST', body: '{"op":"addCredential",...}' })
+     *
+     * 从 `https://evil.example` 发起会返回 200 并真的写库。同源策略只阻止
+     * **读**响应，不阻止**发**请求。
+     *
+     * 如果有人把这里改回「无条件放行」，这条会立刻红。
+     */
+    assertDeny(
+      checkOrigin({ remoteAddress: "127.0.0.1", host: "127.0.0.1:3000", origin: "https://evil.example" }),
+      "cross-origin",
+    );
+    assertDeny(
+      checkOrigin({ remoteAddress: "::ffff:127.0.0.1", host: "localhost:1", origin: "http://attacker.test" }),
+      "cross-origin",
+    );
+    /* 伪造 Host 也挡不住 —— 判据是 Origin，不是 Host。 */
+    assertDeny(
+      checkOrigin({ remoteAddress: "127.0.0.1", host: "127.0.0.1:3000", origin: "http://127.0.0.1.evil.example:3000" }),
+      "cross-origin",
     );
   });
 

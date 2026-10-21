@@ -59,6 +59,18 @@ jobs:
       - name: build
         run: npm run build
 
+      # 第二道半：浏览器产物与源码同步。
+      #
+      # `client.js` 是**提交进 git 的构建产物**（`files` 里声明了它，
+      # 宿主按 `exports["./client"]` 找它）。提交产物的代价是"改了源码忘了
+      # 重建"会悄悄发出一个旧产物 —— 而这个门禁把它变成可见的红灯。
+      #
+      # 注意这一步**只比对、不写盘**（`--check`）。要重建请本地跑
+      # `npm run build:client` 并把结果一起提交。
+      - name: verify client artifact is up to date
+        run: npm run check:client
+
+
       - name: smoke test CLI
         run: |
           node dist/cli/index.js --help

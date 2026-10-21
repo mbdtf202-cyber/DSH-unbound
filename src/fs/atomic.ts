@@ -109,10 +109,25 @@ export interface BackupResult {
  *
  * 关键：**只备份一次**。如果备份已存在，说明它是「上一个版本的原始件」，
  * 再覆盖就把用户唯一的回滚路径弄丢了。原项目用 `.bak` 存在即跳过。
+ *
+ * ## 为什么必须同时看 legacy 备份（真实踩过的坑）
+ *
+ * 从 dsh-qilin 迁移过来的宿主上，`.dshqilin.bak` 里是**干净的原文**，而当前
+ * 文件是**已被旧版打过补丁的字节**。早先这里只检查自己的 `.dsh-unbound.bak`，
+ * 于是迁移后会**再复制一份已经打过补丁的当前文件**当备份：
+ *
+ *     file.js             = 已打补丁（旧版产物）
+ *     file.js.dshqilin.bak = 干净原文      ← 唯一可回滚的路径
+ *     file.js.dsh-unbound.bak = 已打补丁   ← 被这里新建，污染
+ *
+ * `findBackup()` / `revertPatches()` 都**优先**用自然后缀，于是 revert 会把
+ * 「已打补丁的字节」写回去并声称「已还原」—— 用户以为回到官方原文，其实没有。
+ * 现在只要任一后缀已有备份就复用它，绝不再从当前（可能已污染的）文件复制。
  */
 export function ensureBackupSync(filePath: string): BackupResult {
+  const existing = findBackup(filePath);
+  if (existing !== null) return { created: false, backupPath: existing };
   const own = backupPathOf(filePath);
-  if (isRegularFile(own)) return { created: false, backupPath: own };
   if (!isRegularFile(filePath)) return { created: false, backupPath: own };
   fs.copyFileSync(filePath, own);
   return { created: true, backupPath: own };

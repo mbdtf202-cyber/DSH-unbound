@@ -19,7 +19,14 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { applyPatchToText, isPatchApplied, patchHasRemainingWork, toLf } from "./text.js";
+import {
+  applyPatchToText,
+  contendedMarkers,
+  isPatchApplied,
+  patchHasRemainingWork,
+  patchOwnsItsMarkers,
+  toLf,
+} from "./text.js";
 import { atomicWriteFileSync, ensureBackupSync, isRegularFile, readTextIfExists } from "../fs/atomic.js";
 import type { PatchDefinition, PatchStatus } from "../patches/types.js";
 import { resolveTarget } from "../host/targets.js";
@@ -172,8 +179,22 @@ export function applyPatches(
   const outcomes: PatchOutcome[] = [];
   const written = new Set<string>();
 
+  // 标记争用：被多条命中同一批文件的补丁共用的标记，无法证明「是哪一条打的」。
+  // 这类标记不能作为 already 的凭据，否则后一条补丁会被前一条的标记永久遮蔽（#73 即此）。
+  const contended = contendedMarkers(selected, (p) => collectTargets(p, aiBase).paths);
+
+  /**
+   * 仅 dryRun 使用：虚拟写入内容。
+   *
+   * 多条补丁会命中**同一个文件**（实测 `agent-loop` 被 #55/#67/#74/#87/#89 共用）。
+   * 真跑时前一条写入后，后一条读到的是新内容；dryRun 不写盘，若每条都重读磁盘，
+   * 后一条就会看到**前一条尚未生效的旧内容** —— 于是 dryRun 报出的 status 与真跑不一致
+   * （实测 #87 会从 applied 误报成 pattern_not_found）。用 overlay 让预演同序。
+   */
+  const overlay = new Map<string, string>();
+
   for (const patch of selected) {
-    outcomes.push(applyOne(patch, aiBase, opts, written));
+    outcomes.push(applyOne(patch, aiBase, opts, written, contended, overlay));
   }
 
   const count = (s: PatchStatus): number => outcomes.filter((o) => o.status === s).length;
@@ -191,11 +212,19 @@ export function applyPatches(
   return { aiBase, outcomes, summary, writtenFiles: [...written].sort() };
 }
 
+/** 这条补丁声明的标记里，是否有被别的补丁争用的。 */
+function hasContendedMarker(patch: PatchDefinition, contended: ReadonlySet<string>): boolean {
+  const ms = [...(patch.markers ?? []), ...(patch.marker === undefined ? [] : [patch.marker])];
+  return ms.some((m) => contended.has(toLf(m)));
+}
+
 function applyOne(
   patch: PatchDefinition,
   aiBase: string,
   opts: ApplyOptions,
   written: Set<string>,
+  contended: ReadonlySet<string>,
+  overlay: Map<string, string>,
 ): PatchOutcome {
   const { paths, missingKeys } = collectTargets(patch, aiBase);
 
@@ -223,7 +252,8 @@ function applyOne(
   for (const fp of paths) {
     let text: string | null;
     try {
-      text = readTextIfExists(fp);
+      // dryRun 时优先读「本该写入」的虚拟内容，保证预演与真跑同序。
+      text = overlay.get(fp) ?? readTextIfExists(fp);
     } catch (cause) {
       readErrors += 1;
       firstError ??= `${fp}: ${(cause as Error).message}`;
@@ -235,8 +265,26 @@ function applyOne(
       continue;
     }
 
+    // 标记是否足以证明「这条补丁已经打过了」。
+    // 标记能否单独证明「这条已经打过了」。三种情况：
+    //
+    //   1. 标记是我自己写的（#70）                → 能。照常 already。
+    //   2. 借来的标记，但没有被争用（单补丁场景）  → 能。保持原行为，不误伤。
+    //   3. 借来的标记 + 被争用（#73）             → 不能单独证明，改用「还有没有活干」。
+    //
+    // 情况 3 的关键：纯删除型补丁（#73 替换值只是 "\n"）在文件里**不留任何痕迹**，
+    // 唯一的线索就是「它的 pattern 还在不在」。
+    //   - pattern 还在  → 这条补丁的工作没做 → 不能算 already（否则永久遮蔽，#73 原 bug）
+    //   - pattern 没了  → 要么打过了，要么上游改版。后者无法区分，
+    //                     而标记确实存在于同一批文件上，按「打过」处理更符合实际。
+    const ownsMarker = patchOwnsItsMarkers(patch);
+    const markerContended = hasContendedMarker(patch, contended);
+    const markersTrustworthy = ownsMarker || !markerContended;
+    /** 情况 3 的补充判据：没有剩余工作，才算它已经打完。 */
+    const settledWithoutMarker = !ownsMarker && markerContended && !patchHasRemainingWork(text, patch, fp);
+
     // 已应用 + skipIfMarked → 完全不动（防重复插入）
-    if (patch.skipIfMarked && isPatchApplied(text, patch)) {
+    if (patch.skipIfMarked && isPatchApplied(text, patch) && (markersTrustworthy || settledWithoutMarker)) {
       alreadyCount += 1;
       continue;
     }
@@ -245,7 +293,9 @@ function applyOne(
     //   「already」只能由 markers/marker/replace 首行命中来证明 **已经应用过**；
     //   「没有剩余工作」不能证明已应用 —— 上游改版把 pattern 换掉时同样没有剩余工作，
     //   那叫漂移（pattern_not_found），不是已完成。早先把两者混同会让漂移静默显示为 already。
-    if (isPatchApplied(text, patch)) {
+    //
+    // 标记被争用时连这一条也不能用：那正是 #73 被误判的入口。
+    if (isPatchApplied(text, patch) && (markersTrustworthy || settledWithoutMarker)) {
       alreadyCount += 1;
       continue;
     }
@@ -258,7 +308,9 @@ function applyOne(
 
     let result;
     try {
-      result = applyPatchToText(text, patch, fp);
+      // 关掉内置的 skipIfMarked 短路：上面已经用标记争用判定过了，
+      // 再让内层无条件短路会把它推翻（#73 就死在这一层）。
+      result = applyPatchToText(text, patch, fp, { respectSkipIfMarked: false });
     } catch (cause) {
       writeErrors += 1;
       firstError ??= `${fp}: ${(cause as Error).message}`;
@@ -277,6 +329,8 @@ function applyOne(
     }
 
     if (opts.dryRun === true) {
+      // 不写盘，但把内容记进 overlay：后续补丁要看到与真跑一致的状态。
+      overlay.set(fp, result.text);
       changedFiles.push(fp);
       continue;
     }

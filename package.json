@@ -10,6 +10,7 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./client": "./client.js",
     "./engine": {
       "types": "./dist/engine/index.d.ts",
       "default": "./dist/engine/index.js"
@@ -17,6 +18,10 @@
     "./patches": {
       "types": "./dist/patches/index.d.ts",
       "default": "./dist/patches/index.js"
+    },
+    "./service": {
+      "types": "./dist/redteam/service.d.ts",
+      "default": "./dist/redteam/service.js"
     },
     "./package.json": "./package.json"
   },
@@ -26,17 +31,22 @@
   "files": [
     "dist",
     "patches",
+    "client.js",
+    "cordis.patch.yml",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && chmod +x dist/cli/index.js",
+    "build": "npm run build:bundle && npm run build:client",
+    "build:bundle": "tsc -p tsconfig.build.json && chmod +x dist/cli/index.js",
+    "build:client": "node scripts/build-client.mjs",
+    "check:client": "node scripts/build-client.mjs --check",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build:test && node --test dist-test/test/*.test.js dist-test/test/*/*.test.js",
     "test:cov": "npm run build:test && node --test --experimental-test-coverage dist-test/test/*.test.js dist-test/test/*/*.test.js",
     "extract:patches": "node scripts/extract-patches.mjs",
     "verify:patches": "npm run build:test && node dist-test/scripts/verify-patches.js",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run build && npm run check:client",
     "build:test": "tsc -p tsconfig.test.json",
     "prepare": "npm run build",
     "sync:patches": "node scripts/sync-patches.mjs sync",
@@ -55,6 +65,20 @@
   ],
   "engines": {
     "node": ">=22.15.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
+    }
   },
   "license": "MIT",
   "devDependencies": {

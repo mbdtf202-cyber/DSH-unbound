@@ -1,0 +1,94 @@
+# dsh-unbound bundle patch
+#
+# 宿主在 boot 时按 `dsh.bundle.patch` 读本文件，把下面的行插进 Cordis 插件树。
+# 没有这份文件，包里的一切都只是源码 —— 宿主根本不会加载它。
+#
+# 本插件由两半组成，各自对应一行：
+#
+#   1. `dsh-unbound`           —— 宿主半侧（提示词段 / 工具 / 命令 / settle 落定）。
+#                                 入口是 package.json 的 `exports["."]` → dist/index.js。
+#   2. `dsh-unbound/client`    —— 浏览器半侧（红队控制台，挂 shell.overlay 槽位）。
+#                                 入口是 `exports["./client"]` → client.js，
+#                                 由 package.json 的 `dsh.client` 声明并注入。
+
+# ── 关掉与红队控制台冲突的历史包 ──
+# 用户以前装过独立红队包时，这些行会和本插件的控制台抢同一个槽位。
+# disabled 而不是删除：删除会让"用户自己也装过"这件事凭空消失，排查时看不到。
+- id: redteam-store
+  name: dsh-redteam-store
+  disabled: true
+
+- id: redteam-ui
+  name: dsh-redteam-ui
+  disabled: true
+
+- id: redteam-mode
+  name: dsh-redteam-mode
+  disabled: true
+
+- id: redteam-mode-store
+  name: dsh-redteam-mode/store
+  disabled: true
+
+- id: redteam-mode-ui
+  name: dsh-redteam-mode/ui
+  disabled: true
+
+# ── 去掉宿主默认身份句 ──
+# 与本插件补丁 #4/#5 的目的相同，但在插件树层面先做一次：
+# 补丁是"改宿主文件"，这里是"改装配参数"，两条路径互为兜底。
+- id: system-prompt
+  config:
+    includeHarnessIdentity: false
+    personaPrefix: ""
+    personaSuffix: ""
+
+- id: dsh-unbound
+  inject: [systemPrompt, tools]
+
+- insert:
+    # 宿主半侧：提示词段、工具、命令、补丁落定
+    - id: dsh-unbound
+      name: 'dsh-unbound'
+      inject: [systemPrompt, tools]
+      config:
+        enabled: true
+        # 启动不写宿主包 —— 与上游一致：补丁只在用户点「应用」时落盘。
+        # 开机自动改宿主文件会让"我什么都没干，包就变了"无法解释。
+        autoApplyOnStart: false
+        stripMnemon: true
+        verbose: false
+        capabilityProtocol: true
+
+    # ── 服务端聚合入口：红队事实库 + HTTP 桥 `POST /redteam/api` ──
+    #
+    # 这一行**必须有**，否则浏览器半侧的 10 个页签全部 404：
+    #   · client.js 能加载、页签能渲染（那走 dsh.client，不在本表）；
+    #   · 但每个页签的数据都从 `POST /redteam/api` 来，而那条路由只在这里注册。
+    # 症状是"面板在、但是空的"：`client/api.ts` 的契约是永不 reject，
+    # 所以 404 会被静默吃成空态，比完全不出现更难排查。
+    #
+    # `inject: []` 是有意的：本行声明的插件自己**不**硬依赖任何服务。
+    #   · `webServer` 在 headless 面上不存在，写进 inject 会让宿主对
+    #     这个 key 永久 pending → 启动超时 → 退出码 1（上游有同款事故）；
+    #   · 需要 webServer 的地方在 plugin 里用 `ctx.inject(["webServer"], cb)`
+    #     懒等 —— 服务出现时回调才跑，不出现也不会拖死启动。
+    #   · `redteam` 服务由本插件**自己 provide**，更不能写进 inject。
+    #
+    # 入口是 `exports["./service"]` → dist/redteam/service.js。
+    # 它**不进** `src/index.ts` 的导出面：那一层带了 node:sqlite + web server，
+    # 进公共桶会让只跑补丁命令的场景也拉起重依赖。
+    - id: dsh-unbound-service
+      name: 'dsh-unbound/service'
+      inject: []
+
+    # ── 浏览器半侧不需要在这张表里插行 ──
+    #
+    # 红队控制台（client.js）由 package.json 的 `dsh.client` 声明、宿主按
+    # `exports["./client"]` 找文件自动加载，**不走 Cordis 插件树**。
+    #
+    # 这里曾经错误地插过一行 `name: 'dsh-unbound/client'` —— 那会让宿主
+    # 把同一个模块加载两次（一次来自本轮 insert，一次来自 dsh.client 扫描），
+    # 结果是一个已注册的槽位被重复 `register`，控制台渲染两遍。
+    # 删掉。上游 dsh-qilin 的 insert 也只有宿主侧 + store + ui 三行，同样不含 client。
+

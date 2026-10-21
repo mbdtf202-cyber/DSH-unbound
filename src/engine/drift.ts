@@ -19,7 +19,14 @@
  * 判定必须是三态而不是布尔：`unknown`（文件缺失导致无法判定）不能当成失败，
  * 否则 optional/desktop-only 的补丁会把整次检测染红。
  */
-import { isPatchApplied, matchesPattern, toLf } from "../engine/text.js";
+import {
+  contendedMarkers,
+  isPatchApplied,
+  matchesPattern,
+  patchHasRemainingWork,
+  patchOwnsItsMarkers,
+  toLf,
+} from "../engine/text.js";
 import { readTextIfExists } from "../fs/atomic.js";
 import type { PatchDefinition } from "../patches/types.js";
 import { resolveTarget } from "../host/targets.js";
@@ -112,7 +119,11 @@ function patternTextOf(p: PatchDefinition): string[] {
 }
 
 /** 诊断单条补丁。 */
-export function diagnosePatch(patch: PatchDefinition, aiBase: string): PatchDrift {
+export function diagnosePatch(
+  patch: PatchDefinition,
+  aiBase: string,
+  contended: ReadonlySet<string> = new Set<string>(),
+): PatchDrift {
   const files = new Set<string>();
   for (const key of patch.fileKeys) {
     for (const fp of resolveTarget(key, aiBase).paths) files.add(fp);
@@ -150,8 +161,26 @@ export function diagnosePatch(patch: PatchDefinition, aiBase: string): PatchDrif
     };
   }
 
-  // 已应用判定：任一目标文件带标记即算（多写目标时，实现文件才是权威）
-  const appliedSomewhere = texts.some(({ text }) => isPatchApplied(text, patch));
+  // 已应用判定：任一目标文件带标记即算（多写目标时，实现文件才是权威）。
+  //
+  // 但标记必须可信，否则「已应用」会掩盖真实漂移：
+  //   owned     — 标记是我的产出，不是借别人的
+  //   contended — 没有别的补丁与我共用同一标记且命中同一批文件
+  // 真实案例 #73：它借了 #70 的标记，于是自己的 pattern 明明还活着却被报 applied。
+  const markerSet = [...(patch.markers ?? []), ...(patch.marker === undefined ? [] : [patch.marker])];
+  // 标记可信度三态（与 applyOne 保持同一套判据，两个命令口径必须一致）：
+  //   1. 自己写的标记 → 可信
+  //   2. 借来的但未被争用 → 可信
+  //   3. 借来的 + 被争用（#73）→ 不能单独证明，改用「pattern 是否还活着」
+  const ownsMarker = patchOwnsItsMarkers(patch);
+  const markerContended = markerSet.some((m) => contended.has(toLf(m)));
+  const markersTrustworthy = ownsMarker || !markerContended;
+  // 情况 3 的补充：没有任何目标文件还有剩余工作 → 才算它确实打完了。
+  const settledWithoutMarker =
+    !ownsMarker && markerContended && texts.every(({ fp, text }) => !patchHasRemainingWork(text, patch, fp));
+  // 已应用：标记可信且确实带着标记；或者「借来的争用标记 + 已经无活可干」。
+  const appliedSomewhere =
+    (markersTrustworthy && texts.some(({ text }) => isPatchApplied(text, patch))) || settledWithoutMarker;
   // forbid 命中 = 曾经应用又被回滚
   const reverted = patch.forbid
     ? texts.some(({ text }) => patch.forbid!.some((m) => text.includes(toLf(m))))
@@ -206,7 +235,13 @@ export function diagnosePatch(patch: PatchDefinition, aiBase: string): PatchDrif
 
 /** 对一批补丁做全量诊断。 */
 export function diagnoseAll(patches: readonly PatchDefinition[], aiBase: string): DriftReport {
-  const results = patches.map((p) => diagnosePatch(p, aiBase));
+  // 先算标记争用表（与 applyPatches 用同一套判据，保证两个命令口径一致）。
+  const contended = contendedMarkers(patches, (p) => {
+    const files: string[] = [];
+    for (const key of p.fileKeys) for (const fp of resolveTarget(key, aiBase).paths) files.push(fp);
+    return files;
+  });
+  const results = patches.map((p) => diagnosePatch(p, aiBase, contended));
   const count = (s: PatchDrift["state"]): number => results.filter((r) => r.state === s).length;
   const summary: DriftSummary = {
     total: results.length,

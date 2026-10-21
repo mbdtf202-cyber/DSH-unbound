@@ -80,3 +80,16 @@ export {
   wrapFragment,
 } from "./extract.js";
 export type { ExtractedFragment, MarkerError } from "./extract.js";
+
+/**
+ * 客户端产物装配（源码 → `client.js`）。
+ *
+ * 这三个是 `scripts/build-client.mjs` 的全部依赖面：构建脚本只用
+ * `defaultTemplate` + `assemble` 就能产出宿主契约文件，因此**装配逻辑
+ * 只有一份**，脚本里不再有第二套拼接代码。
+ *
+ * `HostTemplate` 之所以一起导出：测试要能给自定义 id / 自定义 prologue
+ * 的模板跑装配，而不必复制 `defaultTemplate` 的结构。
+ */
+export { assemble, assembleNormalized, defaultTemplate, describeArtifact, fragmentOf, isUpToDate, renderTemplate } from "./build.js";
+export type { AssembleError, AssembleResult, HostTemplate } from "./build.js";
