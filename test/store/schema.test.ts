@@ -321,11 +321,32 @@ describe("schema: 检索不会产生幽灵结果（FTS 孤儿行）", () => {
     assert.equal(store.listAssets(id, { q: "ghost" }).total, 1, "删前能命中");
     /* store 没有删除资产的接口（上游也没有），所以模拟"用户手工删库里的行" */
     store.db(id).exec("DELETE FROM asset WHERE ip = '10.0.0.5'");
-    /* asset_fts 里确实留下了孤儿行 —— 这不是 bug，而是"FTS 不是数据源"的直接后果 */
-    const orphans = Number(store.db(id).prepare<{ n: number }>("SELECT COUNT(*) AS n FROM asset_fts").get()?.n ?? 0);
-    assert.equal(orphans >= 1, true, "孤儿行确实存在（FTS 只是索引）");
-    /* 关键断言：检索仍为 0 —— 因为查询是 `FROM asset a WHERE a.id IN (SELECT ... FROM asset_fts ...)`，
-       asset 表是驱动表，孤儿行只是"多一个匹配的 id"，而这个 id 在 asset 里已经不存在。 */
+
+    /* 孤儿行的形成方式**取决于本机 node:sqlite 有没有 FTS5**，两种构建下的
+       "表"是什么、要断言什么，都不一样：
+
+       · 有 FTS5：存在 asset_fts 虚拟表，删 asset 行会在索引里留下孤儿行。
+         这本身不是 bug —— 它是"FTS 只是索引、不是数据源"的直接后果。
+       · 无 FTS5（Node 22.15 及更早的构建）：根本不建 asset_fts，检索走 LIKE 兜底，
+         无索引可言，也就无所谓孤儿行。
+
+       之前这条用例无条件 `SELECT ... FROM asset_fts`，在无 FTS5 的 CI 上直接
+       `no such table: asset_fts` 失败。但**"不产生幽灵结果"这个保证在两种构建下
+       都必须成立**，所以不能整条跳过，而是按构建分别验证「前提」与「结果」。 */
+    if (HAS_FTS5) {
+      const orphans = Number(store.db(id).prepare<{ n: number }>("SELECT COUNT(*) AS n FROM asset_fts").get()?.n ?? 0);
+      assert.equal(orphans >= 1, true, "孤儿行确实存在（FTS 只是索引）");
+    } else {
+      const hasTable = store.db(id).prepare<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'asset_fts'",
+      ).get() !== undefined;
+      assert.equal(hasTable, false, "无 FTS5 时就不该有 asset_fts 表 —— 检索必须走 LIKE 兜底");
+    }
+
+    /* 关键断言（两种构建都必须成立）：检索仍为 0。
+       · 有 FTS5：查询是 `FROM asset a WHERE a.id IN (SELECT ... FROM asset_fts ...)`，
+         asset 表是驱动表，孤儿行只是"多一个匹配的 id"，而这个 id 在 asset 里已不存在。
+       · 无 FTS5：LIKE 兜底的每个子查询都以 `a.id` 为关联条件，asset 行没了就无从命中。 */
     assert.equal(store.listAssets(id, { q: "ghost" }).total, 0, "绝不能返回幽灵结果");
     assert.equal(store.listAssets(id, {}).total, 0, "列表总数为 0");
     /* 详情页也查不到（getAsset 按 asset 表的 id 取） */
